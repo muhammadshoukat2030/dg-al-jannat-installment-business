@@ -1,0 +1,293 @@
+import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import {
+  Users,
+  UserCheck,
+  UserX,
+  DollarSign,
+  TrendingUp,
+  TrendingDown,
+  Wallet,
+  AlertTriangle,
+  PlusCircle,
+} from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
+import { dashboardApi, ownerApi } from '../api/services';
+import { formatCurrency, formatDate } from '../utils/format';
+import StatCard from '../components/dashboard/StatCard';
+import StatusBadge from '../components/common/StatusBadge';
+
+export default function Dashboard() {
+  const [data, setData] = useState(null);
+  const [ownerProfit, setOwnerProfit] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    Promise.all([dashboardApi.summary(), ownerApi.profit()])
+      .then(([summaryRes, ownerRes]) => {
+        setData(summaryRes.data.data);
+        setOwnerProfit(ownerRes.data.data);
+      })
+      .catch((err) => setError(err.response?.data?.message || 'Failed to load dashboard.'))
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) return <div className="p-8 text-center text-gray-500">Loading dashboard...</div>;
+  if (error) return <div className="p-8 text-center text-red-500">{error}</div>;
+  if (!data) return null;
+
+  const { business, financial, collection, installments, profitLoss, investorOverview, topInvestors, topOutstanding, overdueCustomers, recentPayments, recentCustomers } = data;
+
+  const pieData = [
+    { name: 'Profit', value: profitLoss.totalProfit, color: '#16a34a' },
+    { name: 'Loss', value: profitLoss.totalLoss, color: '#dc2626' },
+  ];
+
+  const collectionData = [
+    { name: 'Today', value: collection.today },
+    { name: 'This Week', value: collection.thisWeek },
+    { name: 'This Month', value: collection.thisMonth },
+    { name: 'This Year', value: collection.thisYear },
+  ];
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <h1 className="text-xl font-bold">Business Overview</h1>
+        <div className="flex gap-2 flex-wrap">
+          <Link to="/customers/new" className="btn-primary">
+            <PlusCircle className="w-4 h-4" /> Add Customer
+          </Link>
+          <Link to="/customers" className="btn-secondary">View Customers</Link>
+          <Link to="/reports" className="btn-secondary">Reports</Link>
+        </div>
+      </div>
+
+      <section>
+        <h2 className="text-sm font-semibold text-gray-500 mb-3">BUSINESS OVERVIEW</h2>
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+          <StatCard label="Total Customers" value={business.totalCustomers} icon={Users} />
+          <StatCard label="Active Customers" value={business.activeCustomers} icon={UserCheck} tone="good" />
+          <StatCard label="Completed Customers" value={business.completedCustomers} icon={UserX} />
+          <StatCard label="Active Contracts" value={business.activeContracts} icon={Wallet} />
+          <StatCard label="Completed Contracts" value={business.completedContracts} icon={Wallet} tone="good" />
+        </div>
+      </section>
+
+      <section>
+        <h2 className="text-sm font-semibold text-gray-500 mb-3">BUSINESS FINANCIALS</h2>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <StatCard label="Total Sales" value={formatCurrency(financial.totalSales)} icon={DollarSign} />
+          <StatCard label="Total Product Cost" value={formatCurrency(financial.totalProductCost)} icon={DollarSign} />
+          <StatCard label="Total Collected" value={formatCurrency(financial.totalCollected)} icon={TrendingUp} tone="good" />
+          <StatCard label="Total Remaining" value={formatCurrency(financial.totalRemaining)} icon={Wallet} tone="warn" />
+          <StatCard label="Expected Profit" value={formatCurrency(financial.expectedProfit)} icon={TrendingUp} tone="good" />
+          <StatCard label="Expected Loss" value={formatCurrency(financial.expectedLoss)} icon={TrendingDown} tone="bad" />
+          <StatCard
+            label="Net Expected Profit"
+            value={formatCurrency(financial.netExpectedProfit)}
+            icon={TrendingUp}
+            tone={financial.netExpectedProfit >= 0 ? 'good' : 'bad'}
+          />
+        </div>
+      </section>
+
+      <section>
+        <h2 className="text-sm font-semibold text-gray-500 mb-3">INSTALLMENT OVERVIEW</h2>
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+          <StatCard label="Paid" value={installments.paid} tone="good" />
+          <StatCard label="Partial" value={installments.partial} tone="warn" />
+          <StatCard label="Pending" value={installments.pending} />
+          <StatCard label="Missed" value={installments.missed} tone="bad" />
+          <StatCard label="Overdue" value={installments.overdue} tone="bad" />
+        </div>
+        <div className="grid grid-cols-2 gap-4 mt-4">
+          <StatCard label="Missed Amount" value={formatCurrency(installments.missedAmount)} tone="bad" />
+          <StatCard label="Overdue Amount" value={formatCurrency(installments.overdueAmount)} tone="bad" />
+        </div>
+      </section>
+
+      {ownerProfit && (
+        <section>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold text-gray-500">OWNER</h2>
+            <Link to="/owner" className="text-xs text-primary-600 hover:underline">View Owner Dashboard</Link>
+          </div>
+          <p className="text-xs text-gray-400 mb-3">
+            The Owner's 50% profit share earned from investor-funded contracts — kept
+            separate from investor capital and from overall business sales/profit above.
+          </p>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <StatCard label="Total Owner Profit" value={formatCurrency(ownerProfit.totalOwnerProfit)} tone="good" />
+            <StatCard label="Owner Profit Withdrawn" value={formatCurrency(ownerProfit.totalOwnerWithdrawn)} tone="warn" />
+            <StatCard label="Owner Profit Remaining" value={formatCurrency(ownerProfit.totalOwnerRemaining)} tone="good" />
+            <StatCard label="Investors Contributing" value={ownerProfit.perInvestor.length} />
+          </div>
+        </section>
+      )}
+
+      <section>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-semibold text-gray-500">INVESTORS</h2>
+          <Link to="/investors" className="text-xs text-primary-600 hover:underline">View all investors</Link>
+        </div>
+        <p className="text-xs text-gray-400 mb-3">
+          Investor capital is tracked separately from business sales/revenue/profit above — these are distinct
+          accounting concepts and are never mixed.
+        </p>
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
+          <StatCard label="Total Investors" value={investorOverview.totalInvestors} />
+          <StatCard label="Capital Received" value={formatCurrency(investorOverview.totalCapitalReceived)} />
+          <StatCard label="Capital Returned" value={formatCurrency(investorOverview.totalCapitalReturned)} />
+          <StatCard label="Capital Held" value={formatCurrency(investorOverview.totalCapitalHeld)} tone="good" />
+          <StatCard label="Capital Deployed" value={formatCurrency(investorOverview.totalCapitalDeployed)} tone="warn" />
+          <StatCard label="Recovered Capital" value={formatCurrency(investorOverview.totalRecoveredCapital || 0)} tone="good" />
+          <StatCard label="Capital Still Deployed" value={formatCurrency(investorOverview.totalCapitalStillDeployed != null ? investorOverview.totalCapitalStillDeployed : investorOverview.totalCapitalDeployed)} tone="warn" />
+          <StatCard label="Profit Reinvested" value={formatCurrency(investorOverview.totalProfitReinvested || 0)} tone="good" />
+          <StatCard label="Capital Available" value={formatCurrency(investorOverview.totalCapitalAvailable)} tone="good" />
+          <StatCard label="Investor-Funded Contracts" value={investorOverview.contractsFunded} />
+        </div>
+
+        {topInvestors.length > 0 && (
+          <div className="card mt-4">
+            <h3 className="text-sm font-semibold text-gray-500 mb-3">TOP INVESTORS</h3>
+            <div className="space-y-2">
+              {topInvestors.map((row) => (
+                <Link
+                  to={`/investors/${row.investor._id}`}
+                  key={row.investor._id}
+                  className="flex items-center justify-between text-sm py-2 border-b border-gray-100 dark:border-gray-800 last:border-0 hover:opacity-80"
+                >
+                  <div>
+                    <p className="font-medium">{row.investor.name}</p>
+                    <p className="text-gray-500 text-xs">
+                      Deployed: {formatCurrency(row.capitalDeployed)} · Available: {formatCurrency(row.capitalAvailable)}
+                    </p>
+                  </div>
+                  <span className="font-semibold">{formatCurrency(row.totalInvested)}</span>
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
+      </section>
+
+      <section className="grid md:grid-cols-2 gap-4">
+        <div className="card">
+          <h2 className="text-sm font-semibold text-gray-500 mb-3">COLLECTION OVERVIEW</h2>
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart data={collectionData}>
+              <XAxis dataKey="name" fontSize={12} />
+              <YAxis fontSize={12} />
+              <Tooltip formatter={(v) => formatCurrency(v)} />
+              <Bar dataKey="value" fill="#2563eb" radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+        <div className="card">
+          <h2 className="text-sm font-semibold text-gray-500 mb-3">PROFIT VS LOSS</h2>
+          <ResponsiveContainer width="100%" height={220}>
+            <PieChart>
+              <Pie data={pieData} dataKey="value" nameKey="name" outerRadius={80} label>
+                {pieData.map((entry) => (
+                  <Cell key={entry.name} fill={entry.color} />
+                ))}
+              </Pie>
+              <Tooltip formatter={(v) => formatCurrency(v)} />
+              <Legend />
+            </PieChart>
+          </ResponsiveContainer>
+          <p className="text-xs text-gray-500 mt-2">
+            {profitLoss.profitableContracts} profitable · {profitLoss.lossContracts} loss-making · {profitLoss.breakEvenContracts} break-even
+          </p>
+        </div>
+      </section>
+
+      <section className="grid md:grid-cols-2 gap-4">
+        <div className="card">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold text-gray-500">TOP OUTSTANDING CUSTOMERS</h2>
+          </div>
+          <div className="space-y-2">
+            {topOutstanding.length === 0 && <p className="text-sm text-gray-400">No outstanding balances.</p>}
+            {topOutstanding.map((row) => (
+              <Link
+                to={`/customers/${row.customer?._id}`}
+                key={row.planId}
+                className="flex items-center justify-between text-sm py-2 border-b border-gray-100 dark:border-gray-800 last:border-0 hover:opacity-80"
+              >
+                <div>
+                  <p className="font-medium">{row.customer?.name}</p>
+                  <p className="text-gray-500 text-xs">{row.customer?.contactNumber}</p>
+                </div>
+                <span className="font-semibold text-orange-600">{formatCurrency(row.remaining)}</span>
+              </Link>
+            ))}
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="flex items-center gap-2 mb-3">
+            <AlertTriangle className="w-4 h-4 text-red-500" />
+            <h2 className="text-sm font-semibold text-gray-500">OVERDUE CUSTOMERS</h2>
+          </div>
+          <div className="space-y-2 max-h-72 overflow-y-auto">
+            {overdueCustomers.length === 0 && <p className="text-sm text-gray-400">No overdue installments.</p>}
+            {overdueCustomers.map((row, idx) => (
+              <Link
+                to={`/customers/${row.customer?._id}`}
+                key={idx}
+                className="flex items-center justify-between text-sm py-2 border-b border-gray-100 dark:border-gray-800 last:border-0 hover:opacity-80"
+              >
+                <div>
+                  <p className="font-medium">{row.customer?.name}</p>
+                  <p className="text-gray-500 text-xs">Installment #{row.installmentNumber} · {row.daysOverdue}d overdue</p>
+                </div>
+                <span className="font-semibold text-red-600">{formatCurrency(row.remaining)}</span>
+              </Link>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="grid md:grid-cols-2 gap-4">
+        <div className="card">
+          <h2 className="text-sm font-semibold text-gray-500 mb-3">RECENT PAYMENTS</h2>
+          <div className="space-y-2">
+            {recentPayments.length === 0 && <p className="text-sm text-gray-400">No payments yet.</p>}
+            {recentPayments.map((p) => (
+              <div key={p._id} className="flex items-center justify-between text-sm py-2 border-b border-gray-100 dark:border-gray-800 last:border-0">
+                <div>
+                  <p className="font-medium">{p.customerId?.name}</p>
+                  <p className="text-gray-500 text-xs">{formatDate(p.paymentDate)}</p>
+                </div>
+                <span className="font-semibold text-green-600">{formatCurrency(p.amount)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="card">
+          <h2 className="text-sm font-semibold text-gray-500 mb-3">RECENTLY ADDED CUSTOMERS</h2>
+          <div className="space-y-2">
+            {recentCustomers.length === 0 && <p className="text-sm text-gray-400">No customers yet.</p>}
+            {recentCustomers.map((c) => (
+              <Link
+                to={`/customers/${c._id}`}
+                key={c._id}
+                className="flex items-center justify-between text-sm py-2 border-b border-gray-100 dark:border-gray-800 last:border-0 hover:opacity-80"
+              >
+                <div>
+                  <p className="font-medium">{c.name}</p>
+                  <p className="text-gray-500 text-xs">{c.contactNumber}</p>
+                </div>
+                <span className="text-gray-400 text-xs">{formatDate(c.createdAt)}</span>
+              </Link>
+            ))}
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
