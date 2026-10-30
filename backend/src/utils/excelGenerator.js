@@ -1,6 +1,6 @@
 const ExcelJS = require('exceljs');
 
-const DEVELOPER_FOOTER_TEXT = 'Developed by SHOUKAT | 03348004300';
+const DEVELOPER_FOOTER_TEXT = 'Software Development by SHOUKAT | 03348004300';
 
 /**
  * Stream a generic worksheet of rows to the response as .xlsx.

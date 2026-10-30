@@ -3,7 +3,7 @@ const { formatCurrency, formatDate, formatDateTime } = require('./formatHelpers'
 
 // Fixed developer branding — per explicit requirement this text is permanent,
 // never settings-derived, and never editable/removable by the Owner/Admin.
-const DEVELOPER_FOOTER_TEXT = 'Developed by SHOUKAT | 03348004300';
+const DEVELOPER_FOOTER_TEXT = 'Software Development by SHOUKAT | 03348004300';
 
 /**
  * Create a new PDF document, pipe it to the response, and return the doc.
@@ -67,9 +67,13 @@ function drawHeader(doc, settings, title) {
  */
 function finalizePdf(doc) {
   const range = doc.bufferedPageRange();
+  const origBottom = doc.page.margins.bottom;
   for (let i = range.start; i < range.start + range.count; i += 1) {
     doc.switchToPage(i);
-    const bottom = doc.page.height - doc.page.margins.bottom + 14;
+    // Temporarily set bottom margin to 0 so PDFKit's internal line/page check
+    // does not trigger an extra blank page when stamping the footer in the margin area
+    doc.page.margins.bottom = 0;
+    const bottom = doc.page.height - origBottom + 12;
     doc
       .fontSize(8)
       .font('Helvetica')
@@ -77,7 +81,9 @@ function finalizePdf(doc) {
       .text(DEVELOPER_FOOTER_TEXT, doc.page.margins.left, bottom, {
         width: doc.page.width - doc.page.margins.left - doc.page.margins.right,
         align: 'center',
+        lineBreak: false,
       });
+    doc.page.margins.bottom = origBottom;
     doc.fillColor('#000');
   }
   doc.end();

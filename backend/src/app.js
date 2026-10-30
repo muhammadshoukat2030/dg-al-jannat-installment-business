@@ -18,6 +18,7 @@ const exportRoutes = require('./routes/exportRoutes');
 const investorRoutes = require('./routes/investorRoutes');
 const investorExportRoutes = require('./routes/investorExportRoutes');
 const ownerRoutes = require('./routes/ownerRoutes');
+const ownerExportRoutes = require('./routes/ownerExportRoutes');
 const withdrawalRoutes = require('./routes/withdrawalRoutes');
 const fundingRoutes = require('./routes/fundingRoutes');
 
@@ -51,6 +52,7 @@ app.use('/api/exports', exportRoutes);
 app.use('/api/investors', investorRoutes);
 app.use('/api/investor-exports', investorExportRoutes);
 app.use('/api/owner', ownerRoutes);
+app.use('/api/owner-exports', ownerExportRoutes);
 app.use('/api/withdrawals', withdrawalRoutes);
 app.use('/api/funding', fundingRoutes);
 

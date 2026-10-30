@@ -426,21 +426,42 @@ async function processWithdrawal({ investorId, totalAmount, withdrawalDate, refe
  * NOT add to available capital (they were already treated as withdrawn profit, not reinvested).
  */
 async function getOwnerCapitalSummary() {
-  const txAgg = await OwnerTransaction.aggregate([
-    {
-      $match: {
-        transactionType: { $in: ['CAPITAL_IN', 'CAPITAL_RETURNED', 'OWNER_PROFIT_TO_CAPITAL'] },
+  const [txAgg, capitalInTxs] = await Promise.all([
+    OwnerTransaction.aggregate([
+      {
+        $match: {
+          transactionType: { $in: ['CAPITAL_IN', 'CAPITAL_RETURNED', 'OWNER_PROFIT_TO_CAPITAL'] },
+        },
       },
-    },
-    { $group: { _id: '$transactionType', total: { $sum: '$amount' } } },
+      { $group: { _id: '$transactionType', total: { $sum: '$amount' } } },
+    ]),
+    OwnerTransaction.find({
+      transactionType: 'CAPITAL_IN',
+    }).sort({ createdAt: 1 }),
   ]);
-  const totalCapitalAdded = txAgg.find((t) => t._id === 'CAPITAL_IN')?.total || 0;
-  const totalCapitalReturned = txAgg.find((t) => t._id === 'CAPITAL_RETURNED')?.total || 0;
-  const capitalHeld = round2(totalCapitalAdded - totalCapitalReturned);
 
-  // FIX: profitTransferredToCapital comes only from OWNER_PROFIT_TO_CAPITAL transactions,
-  // not from all Withdrawal.ownerAmount records (which are cash-outs, not reinvestments).
+  let originalCapitalInvested = 0;
+  let additionalCapitalAdded = 0;
+  if (capitalInTxs.length > 0) {
+    const initialIndex = capitalInTxs.findIndex((t) => /initial/i.test(t.notes || ''));
+    const initialTx = initialIndex >= 0 ? capitalInTxs[initialIndex] : capitalInTxs[0];
+    originalCapitalInvested = initialTx.amount || 0;
+
+    const initialId = String(initialTx._id);
+    for (const tx of capitalInTxs) {
+      if (String(tx._id) !== initialId) {
+        additionalCapitalAdded += tx.amount || 0;
+      }
+    }
+  }
+
+  const totalCapitalAdded = round2(originalCapitalInvested + additionalCapitalAdded);
+  const totalCapitalReturned = round2(txAgg.find((t) => t._id === 'CAPITAL_RETURNED')?.total || 0);
   const profitTransferredToCapital = round2(txAgg.find((t) => t._id === 'OWNER_PROFIT_TO_CAPITAL')?.total || 0);
+  const totalCapitalInjected = round2(totalCapitalAdded + profitTransferredToCapital);
+
+  // Capital Held is total capital in business custody minus capital returned
+  const capitalHeld = round2(totalCapitalInjected - totalCapitalReturned);
 
   const ownerAllocations = await FundingAllocation.find({ sourceType: 'OWNER' });
   const capitalDeployed = round2(ownerAllocations.reduce((sum, a) => sum + a.amount, 0));
@@ -459,12 +480,14 @@ async function getOwnerCapitalSummary() {
 
   const recoveredCapital = round2(recoveredCapitalPaisa / 100);
   const capitalStillDeployed = round2(Math.max(0, capitalDeployed - recoveredCapital));
-
-  const capitalAvailable = round2(capitalHeld - capitalStillDeployed + profitTransferredToCapital);
+  const capitalAvailable = round2(capitalHeld - capitalStillDeployed);
 
   return {
-    totalCapitalAdded: round2(totalCapitalAdded),
-    totalCapitalReturned: round2(totalCapitalReturned),
+    originalCapitalInvested: round2(originalCapitalInvested),
+    additionalCapitalAdded: round2(additionalCapitalAdded),
+    totalCapitalAdded,
+    totalCapitalReturned,
+    totalCapitalInjected,
     capitalHeld,
     capitalDeployed,
     recoveredCapital,

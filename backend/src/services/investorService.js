@@ -27,7 +27,7 @@ async function getInvestorCapitalSummary(investorId) {
 
   const allocatedPlanIds = await FundingAllocation.distinct('planId');
 
-  const [txAgg, planAgg, allocAgg] = await Promise.all([
+  const [txAgg, planAgg, allocAgg, investmentInTxs] = await Promise.all([
     InvestorTransaction.aggregate([
       { $match: { investorId: investorObjectId } },
       { $group: { _id: '$transactionType', total: { $sum: '$amount' } } },
@@ -56,11 +56,35 @@ async function getInvestorCapitalSummary(investorId) {
       { $match: { sourceType: 'INVESTOR', investorId: investorObjectId } },
       { $group: { _id: null, total: { $sum: '$amount' } } },
     ]),
+    InvestorTransaction.find({
+      investorId: investorObjectId,
+      transactionType: 'INVESTMENT_IN',
+    }).sort({ createdAt: 1 }),
   ]);
 
-  const totalInvested = txAgg.find((t) => t._id === 'INVESTMENT_IN')?.total || 0;
-  const totalReturned = txAgg.find((t) => t._id === 'RETURN_TO_INVESTOR')?.total || 0;
-  const capitalHeld = Math.round((totalInvested - totalReturned) * 100) / 100;
+  let originalCapitalInvested = 0;
+  let additionalCapitalAdded = 0;
+  if (investmentInTxs.length > 0) {
+    // Find initial investment (prioritize explicit 'initial' note if present, else earliest created)
+    const initialIndex = investmentInTxs.findIndex((t) => /initial/i.test(t.notes || ''));
+    const initialTx = initialIndex >= 0 ? investmentInTxs[initialIndex] : investmentInTxs[0];
+    originalCapitalInvested = initialTx.amount || 0;
+
+    const initialId = String(initialTx._id);
+    for (const tx of investmentInTxs) {
+      if (String(tx._id) !== initialId) {
+        additionalCapitalAdded += tx.amount || 0;
+      }
+    }
+  }
+
+  const totalCapitalAdded = Math.round((originalCapitalInvested + additionalCapitalAdded) * 100) / 100;
+  const totalCapitalReturned = Math.round((txAgg.find((t) => t._id === 'RETURN_TO_INVESTOR')?.total || 0) * 100) / 100;
+  const profitTransferredToCapital = Math.round((txAgg.find((t) => t._id === 'PROFIT_TO_CAPITAL')?.total || 0) * 100) / 100;
+  const totalCapitalInjected = Math.round((totalCapitalAdded + profitTransferredToCapital) * 100) / 100;
+
+  // Capital Held is total capital in business custody minus capital returned to investor
+  const capitalHeld = Math.round((totalCapitalInjected - totalCapitalReturned) * 100) / 100;
 
   const planStats = planAgg[0] || {
     directCapitalDeployed: 0,
@@ -100,21 +124,21 @@ async function getInvestorCapitalSummary(investorId) {
   const recoveredCapital = Math.round(recoveredCapitalPaisa) / 100;
   const capitalStillDeployed = Math.round(Math.max(0, capitalDeployed - recoveredCapital) * 100) / 100;
 
-  // FIX: profitTransferredToCapital comes from InvestorTransaction(PROFIT_TO_CAPITAL) records,
-  // NOT from Withdrawal.investorAmount. Old Withdrawal records are cash-outs and must NOT
-  // be counted as capital reinvestment. PROFIT_TO_CAPITAL is an explicit opt-in transfer.
-  const profitTransferredToCapital = Math.round((txAgg.find((t) => t._id === 'PROFIT_TO_CAPITAL')?.total || 0) * 100) / 100;
-
-  // Available capital = (Capital Held - Capital Still Deployed) + Profit Transferred to Capital
-  const capitalAvailable = Math.round((capitalHeld - capitalStillDeployed + profitTransferredToCapital) * 100) / 100;
+  // Available capital is undeployed capital currently held with the business
+  const capitalAvailable = Math.round((capitalHeld - capitalStillDeployed) * 100) / 100;
 
   const fundedCustomerIds = await InstallmentPlan.distinct('customerId', {
     $or: [{ investorId: investorObjectId }, { _id: { $in: await FundingAllocation.distinct('planId', { investorId: investorObjectId }) } }],
   });
 
   return {
-    totalInvested: Math.round(totalInvested * 100) / 100,
-    totalReturned: Math.round(totalReturned * 100) / 100,
+    originalCapitalInvested,
+    additionalCapitalAdded,
+    totalCapitalAdded,
+    totalCapitalReturned,
+    totalInvested: totalCapitalAdded,
+    totalReturned: totalCapitalReturned,
+    totalCapitalInjected,
     capitalHeld,
     capitalDeployed,
     recoveredCapital,
@@ -292,7 +316,13 @@ async function getInvestorDashboardOverview() {
 
   const totalInvested = txAgg.find((t) => t._id === 'INVESTMENT_IN')?.total || 0;
   const totalReturned = txAgg.find((t) => t._id === 'RETURN_TO_INVESTOR')?.total || 0;
-  const capitalHeld = Math.round((totalInvested - totalReturned) * 100) / 100;
+  const profitToCapitalAgg = await InvestorTransaction.aggregate([
+    { $match: { transactionType: 'PROFIT_TO_CAPITAL' } },
+    { $group: { _id: null, total: { $sum: '$amount' } } },
+  ]);
+  const totalProfitReinvested = Math.round((profitToCapitalAgg[0]?.total || 0) * 100) / 100;
+  const totalCapitalInjected = Math.round((totalInvested + totalProfitReinvested) * 100) / 100;
+  const capitalHeld = Math.round((totalCapitalInjected - totalReturned) * 100) / 100;
 
   const allocatedPlanIds = await FundingAllocation.distinct('planId');
   const legacyPlans = await InstallmentPlan.find({
@@ -318,12 +348,7 @@ async function getInvestorDashboardOverview() {
   const totalRecoveredCapital = totalRecoveredCapitalPaisa / 100;
   const totalCapitalStillDeployed = Math.round(Math.max(0, totalCapitalDeployed - totalRecoveredCapital) * 100) / 100;
 
-  const profitToCapitalAgg = await InvestorTransaction.aggregate([
-    { $match: { transactionType: 'PROFIT_TO_CAPITAL' } },
-    { $group: { _id: null, total: { $sum: '$amount' } } },
-  ]);
-  const totalProfitReinvested = Math.round((profitToCapitalAgg[0]?.total || 0) * 100) / 100;
-  const capitalAvailable = Math.round((capitalHeld - totalCapitalStillDeployed + totalProfitReinvested) * 100) / 100;
+  const capitalAvailable = Math.round((capitalHeld - totalCapitalStillDeployed) * 100) / 100;
 
   const fundedCustomerIds = await InstallmentPlan.distinct('customerId', {
     $or: [{ fundingSource: 'INVESTOR' }, { _id: { $in: allocatedPlanIds } }],

@@ -58,6 +58,40 @@ const addCapitalTransaction = asyncHandler(async (req, res) => {
   }
 });
 
+const ownerProfitTransaction = asyncHandler(async (req, res) => {
+  const { transactionType, amount, transactionDate, notes } = req.body;
+  const numAmount = Number(amount);
+  if (!(numAmount > 0) || !Number.isFinite(numAmount)) {
+    return res.status(400).json({ success: false, message: 'Amount must be greater than 0.' });
+  }
+
+  try {
+    if (transactionType === 'PROFIT_CASH_WITHDRAWAL' || transactionType === 'PROFIT_WITHDRAWAL') {
+      await accountingService.processOwnerProfitCashWithdrawal({
+        amount: numAmount,
+        date: transactionDate,
+        notes,
+      });
+    } else if (transactionType === 'PROFIT_TO_CAPITAL') {
+      await accountingService.processOwnerProfitToCapital({
+        amount: numAmount,
+        date: transactionDate,
+        notes,
+      });
+    } else {
+      return res.status(400).json({ success: false, message: 'Invalid profit transaction type.' });
+    }
+
+    const [profit, capital] = await Promise.all([
+      accountingService.getOwnerProfitSummary(),
+      accountingService.getOwnerCapitalSummary(),
+    ]);
+    res.status(201).json({ success: true, data: { profit, capital } });
+  } catch (err) {
+    res.status(err.statusCode || 400).json({ success: false, message: err.message });
+  }
+});
+
 const getWithdrawals = asyncHandler(async (req, res) => {
   const Withdrawal = require('../models/Withdrawal');
   const { page = 1, limit = 30, preset, from, to } = req.query;
@@ -71,4 +105,4 @@ const getWithdrawals = asyncHandler(async (req, res) => {
   res.json({ success: true, data: withdrawals, total, page: Number(page), pages: Math.ceil(total / limit) });
 });
 
-module.exports = { getSummary, getTransactions, getProfit, getCapital, addCapitalTransaction, getWithdrawals };
+module.exports = { getSummary, getTransactions, getProfit, getCapital, addCapitalTransaction, ownerProfitTransaction, getWithdrawals };
