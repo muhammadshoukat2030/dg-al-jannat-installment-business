@@ -328,8 +328,8 @@ export default function MultiFundingSelector({ purchaseCost, onChange }) {
         </p>
       )}
 
-      <p className="text-xs text-gray-400 text-right">
-        Developed by SHOUKAT | 03348004300
+      <p className="text-xs text-theme-muted text-right">
+        Software Development by SHOUKAT | 03348004300
       </p>
     </div>
   );

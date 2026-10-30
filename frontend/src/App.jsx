@@ -12,6 +12,8 @@ import AddInvestor from './pages/AddInvestor';
 import EditInvestor from './pages/EditInvestor';
 import InvestorDetails from './pages/InvestorDetails';
 import OwnerDashboard from './pages/OwnerDashboard';
+import OwnerFundedCustomers from './pages/OwnerFundedCustomers';
+import OwnerFundedContracts from './pages/OwnerFundedContracts';
 import Withdrawals from './pages/Withdrawals';
 import Payments from './pages/Payments';
 import Reports from './pages/Reports';
@@ -43,6 +45,8 @@ export default function App() {
           <Route path="/investors/:id" element={<InvestorDetails />} />
           <Route path="/investors/:id/edit" element={<EditInvestor />} />
           <Route path="/owner" element={<OwnerDashboard />} />
+          <Route path="/owner/funded-customers" element={<OwnerFundedCustomers />} />
+          <Route path="/owner/funded-contracts" element={<OwnerFundedContracts />} />
           <Route path="/withdrawals" element={<Withdrawals />} />
           <Route path="/payments" element={<Payments />} />
           <Route path="/reports" element={<Reports />} />

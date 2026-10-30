@@ -58,6 +58,7 @@ export const investorApi = {
   installments: (id, params) => client.get(`/investors/${id}/installments`, { params }),
   payments: (id, params) => client.get(`/investors/${id}/payments`, { params }),
   profit: (id) => client.get(`/investors/${id}/profit`),
+  profitTransaction: (id, data) => client.post(`/investors/${id}/profit-transaction`, data),
   withdrawals: (id, params) => client.get(`/investors/${id}/withdrawals`, { params }),
 };
 
@@ -204,8 +205,25 @@ export const ownerApi = {
   profit: () => client.get('/owner/profit'),
   capital: () => client.get('/owner/capital'),
   addCapitalTransaction: (data) => client.post('/owner/capital', data),
+  profitTransaction: (data) => client.post('/owner/profit-transaction', data),
   transactions: (params) => client.get('/owner/transactions', { params }),
   withdrawals: (params) => client.get('/owner/withdrawals', { params }),
+  fundedSummary: () => client.get('/owner/funded-summary'),
+  fundedCustomers: (params) => client.get('/owner/funded-customers', { params }),
+  fundedContracts: (params) => client.get('/owner/funded-contracts', { params }),
+};
+
+export const ownerExportApi = {
+  summaryPdf: () => openFile('/owner-exports/summary/pdf', 'owner-summary.pdf'),
+  summaryBlob: () => fetchBlob('/owner-exports/summary/pdf'),
+  transactionsPdf: () => openFile('/owner-exports/transactions/pdf', 'owner-transactions.pdf'),
+  fundedCustomersPdf: () => openFile('/owner-exports/funded-customers/pdf', 'owner-funded-customers.pdf'),
+  fundedContractsPdf: () => openFile('/owner-exports/funded-contracts/pdf', 'owner-funded-contracts.pdf'),
+  outstandingPdf: () => openFile('/owner-exports/outstanding/pdf', 'owner-outstanding.pdf'),
+  summaryExcel: () => downloadFile('/owner-exports/summary/excel', 'owner-summary.xlsx'),
+  transactionsExcel: () => downloadFile('/owner-exports/transactions/excel', 'owner-transactions.xlsx'),
+  fundedCustomersExcel: () => downloadFile('/owner-exports/funded-customers/excel', 'owner-funded-customers.xlsx'),
+  fundedContractsExcel: () => downloadFile('/owner-exports/funded-contracts/excel', 'owner-funded-contracts.xlsx'),
 };
 
 export const withdrawalApi = {

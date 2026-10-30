@@ -13,11 +13,13 @@ import {
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 import { dashboardApi, ownerApi } from '../api/services';
+import { useTheme } from '../context/ThemeContext';
 import { formatCurrency, formatDate } from '../utils/format';
 import StatCard from '../components/dashboard/StatCard';
 import StatusBadge from '../components/common/StatusBadge';
 
 export default function Dashboard() {
+  const { theme } = useTheme();
   const [data, setData] = useState(null);
   const [ownerProfit, setOwnerProfit] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -181,7 +183,7 @@ export default function Dashboard() {
               <XAxis dataKey="name" fontSize={12} />
               <YAxis fontSize={12} />
               <Tooltip formatter={(v) => formatCurrency(v)} />
-              <Bar dataKey="value" fill="#2563eb" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="value" fill={theme === 'dark' ? '#10B981' : '#6C4CF1'} radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>

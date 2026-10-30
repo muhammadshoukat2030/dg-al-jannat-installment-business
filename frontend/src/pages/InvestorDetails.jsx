@@ -9,6 +9,7 @@ import ShareMenu from '../components/common/ShareMenu';
 import DeleteInvestorModal from '../components/investors/DeleteInvestorModal';
 import DateFilterBar from '../components/common/DateFilterBar';
 import WithdrawalModal from '../components/investors/WithdrawalModal';
+import TransactionModal from '../components/investors/TransactionModal';
 
 const TABS = [
   'Overview',
@@ -33,6 +34,7 @@ export default function InvestorDetails() {
   const [loading, setLoading] = useState(true);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [showTxModal, setShowTxModal] = useState(false);
+  const [txModalType, setTxModalType] = useState('PROFIT_CASH_WITHDRAWAL');
   const [showWithdrawModal, setShowWithdrawModal] = useState(false);
 
   const load = useCallback(async () => {
@@ -66,10 +68,10 @@ export default function InvestorDetails() {
             <Edit className="w-4 h-4" /> <span className="hidden sm:inline">Edit</span>
           </Link>
           <button className="btn-primary" onClick={() => setShowTxModal(true)}>
-            <PlusCircle className="w-4 h-4" /> <span className="hidden sm:inline">Add Transaction</span>
+            <PlusCircle className="w-4 h-4" /> <span className="hidden sm:inline">New Transaction</span>
           </button>
           <button className="btn-secondary" onClick={() => setShowWithdrawModal(true)}>
-            <PlusCircle className="w-4 h-4" /> <span className="hidden sm:inline">Withdraw Profit</span>
+            <PlusCircle className="w-4 h-4" /> <span className="hidden sm:inline">50/50 Paired Withdrawal</span>
           </button>
           <button className="btn-secondary" onClick={() => window.print()}>
             <Printer className="w-4 h-4" /> <span className="hidden sm:inline">Print Summary</span>
@@ -92,42 +94,172 @@ export default function InvestorDetails() {
         </div>
       </div>
 
-      {/* Financial summary cards */}
-      <section className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-        <SummaryCard label="Total Invested" value={formatCurrency(capital.totalInvested)} />
-        <SummaryCard label="Total Returned" value={formatCurrency(capital.totalReturned)} />
+      {/* Clean Investor Financial Summary */}
+      <section className="card p-5 space-y-5 bg-white dark:bg-gray-800 shadow-sm border border-gray-100 dark:border-gray-700">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-gray-100 dark:border-gray-700/80 pb-3">
+          <div>
+            <h2 className="text-base font-bold text-gray-900 dark:text-gray-100">Financial Summary</h2>
+            <p className="text-xs text-gray-500">
+              Clear breakdown of capital balances, profit share, and withdrawable funds
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              className="btn-secondary !text-xs !py-1.5"
+              onClick={() => { setTxModalType('INVESTMENT_IN'); setShowTxModal(true); }}
+            >
+              + Add Capital
+            </button>
+            <button
+              className="btn-secondary !text-xs !py-1.5"
+              onClick={() => { setTxModalType('RETURN_TO_INVESTOR'); setShowTxModal(true); }}
+            >
+              Return Capital
+            </button>
+            <button
+              className="btn-secondary !text-xs !py-1.5"
+              onClick={() => { setTxModalType('PROFIT_TO_CAPITAL'); setShowTxModal(true); }}
+            >
+              Reinvest Profit
+            </button>
+            <button
+              className="btn-primary !text-xs !py-1.5"
+              onClick={() => { setTxModalType('PROFIT_CASH_WITHDRAWAL'); setShowTxModal(true); }}
+            >
+              Withdraw Profit
+            </button>
+          </div>
+        </div>
+
+        {/* Highlighted Banner: Total Amount Currently Available to Withdraw */}
+        <div className="rounded-xl p-4 bg-gradient-to-r from-emerald-500/10 via-teal-500/10 to-primary-500/10 border border-emerald-500/20 dark:border-emerald-500/30">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <p className="text-xs uppercase tracking-wider font-semibold text-emerald-800 dark:text-emerald-300">
+                Total Currently Available to Withdraw
+              </p>
+              <p className="text-2xl sm:text-3xl font-extrabold text-emerald-700 dark:text-emerald-400 mt-1">
+                {formatCurrency((capital?.capitalAvailable || 0) + (profit?.investorRemainingProfit || 0))}
+              </p>
+              <p className="text-xs text-gray-500 mt-1">
+                Strictly separated into available capital and available profit below
+              </p>
+            </div>
+
+            <div className="flex flex-wrap gap-4 sm:gap-6 border-t md:border-t-0 md:border-l border-emerald-500/20 pt-3 md:pt-0 md:pl-6">
+              <div className="bg-white/80 dark:bg-gray-800/80 rounded-lg p-2.5 border border-emerald-500/20">
+                <span className="text-[11px] font-medium text-gray-500 block">Available Capital</span>
+                <span className="text-base font-bold text-gray-900 dark:text-gray-100">
+                  {formatCurrency(capital?.capitalAvailable || 0)}
+                </span>
+                <span className="text-[10px] text-gray-400 block">Undeployed / recovered principal</span>
+              </div>
+
+              <div className="bg-white/80 dark:bg-gray-800/80 rounded-lg p-2.5 border border-emerald-500/20">
+                <span className="text-[11px] font-medium text-gray-500 block">Available Profit</span>
+                <span className="text-base font-bold text-emerald-600 dark:text-emerald-400">
+                  {formatCurrency(profit?.investorRemainingProfit || 0)}
+                </span>
+                <span className="text-[10px] text-gray-400 block">Realized 50% profit share</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Capital Breakdown */}
+        <div>
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2.5">
+            Capital Breakdown
+          </h3>
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2.5 text-xs">
+            <div className="p-2.5 rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-100 dark:border-gray-700">
+              <span className="text-gray-500 block">Original Capital</span>
+              <span className="text-sm font-semibold text-gray-800 dark:text-gray-200 mt-0.5 block">
+                {formatCurrency(capital?.originalCapitalInvested || 0)}
+              </span>
+            </div>
+            <div className="p-2.5 rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-100 dark:border-gray-700">
+              <span className="text-gray-500 block">Additional Capital</span>
+              <span className="text-sm font-semibold text-gray-800 dark:text-gray-200 mt-0.5 block">
+                {formatCurrency(capital?.additionalCapitalAdded || 0)}
+              </span>
+            </div>
+            <div className="p-2.5 rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-100 dark:border-gray-700">
+              <span className="text-gray-500 block">Capital Returned</span>
+              <span className="text-sm font-semibold text-orange-600 dark:text-orange-400 mt-0.5 block">
+                {formatCurrency(capital?.totalCapitalReturned || 0)}
+              </span>
+            </div>
+            <div className="p-2.5 rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-100 dark:border-gray-700">
+              <span className="text-gray-500 block">Capital Deployed</span>
+              <span className="text-sm font-semibold text-gray-800 dark:text-gray-200 mt-0.5 block">
+                {formatCurrency(capital?.capitalDeployed || 0)}
+              </span>
+            </div>
+            <div className="p-2.5 rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-100 dark:border-gray-700">
+              <span className="text-gray-500 block">Recovered Capital</span>
+              <span className="text-sm font-semibold text-emerald-600 dark:text-emerald-400 mt-0.5 block">
+                {formatCurrency(capital?.recoveredCapital || 0)}
+              </span>
+            </div>
+            <div className="p-2.5 rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-100 dark:border-gray-700">
+              <span className="text-gray-500 block">Capital Still Deployed</span>
+              <span className="text-sm font-semibold text-amber-600 dark:text-amber-400 mt-0.5 block">
+                {formatCurrency(capital?.capitalStillDeployed || 0)}
+              </span>
+            </div>
+            <div className="p-2.5 rounded-lg bg-emerald-50/60 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800">
+              <span className="text-emerald-700 dark:text-emerald-300 font-medium block">Current Available Capital</span>
+              <span className="text-sm font-bold text-emerald-700 dark:text-emerald-400 mt-0.5 block">
+                {formatCurrency(capital?.capitalAvailable || 0)}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Profit Breakdown (50% Investor Share) */}
+        <div>
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2.5">
+            Profit Breakdown (50% Investor Share)
+          </h3>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
+            <div className="p-2.5 rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-100 dark:border-gray-700">
+              <span className="text-gray-500 block">Total Profit Earned</span>
+              <span className="text-sm font-semibold text-gray-800 dark:text-gray-200 mt-0.5 block">
+                {formatCurrency(profit?.investorProfitShare || 0)}
+              </span>
+            </div>
+            <div className="p-2.5 rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-100 dark:border-gray-700">
+              <span className="text-gray-500 block">Profit Withdrawn as Cash</span>
+              <span className="text-sm font-semibold text-orange-600 dark:text-orange-400 mt-0.5 block">
+                {formatCurrency(profit?.investorProfitCashWithdrawn || 0)}
+              </span>
+            </div>
+            <div className="p-2.5 rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-100 dark:border-gray-700">
+              <span className="text-gray-500 block">Profit Transferred to Capital</span>
+              <span className="text-sm font-semibold text-primary-600 dark:text-primary-400 mt-0.5 block">
+                {formatCurrency(profit?.investorProfitToCapital || 0)}
+              </span>
+            </div>
+            <div className="p-2.5 rounded-lg bg-emerald-50/60 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800">
+              <span className="text-emerald-700 dark:text-emerald-300 font-medium block">Remaining Available Profit</span>
+              <span className="text-sm font-bold text-emerald-700 dark:text-emerald-400 mt-0.5 block">
+                {formatCurrency(profit?.investorRemainingProfit || 0)}
+              </span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Operational stats cards */}
+      <section className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         <SummaryCard label="Capital Held" value={formatCurrency(capital.capitalHeld)} tone="good" />
-        <SummaryCard label="Capital Deployed" value={formatCurrency(capital.capitalDeployed)} tone="warn" />
-        <SummaryCard label="Recovered Capital" value={formatCurrency(capital.recoveredCapital || 0)} tone="good" />
-        <SummaryCard label="Capital Still Deployed" value={formatCurrency(capital.capitalStillDeployed != null ? capital.capitalStillDeployed : capital.capitalDeployed)} tone="warn" />
-        <SummaryCard label="Profit Reinvested" value={formatCurrency(capital.profitTransferredToCapital || 0)} tone="good" />
-        <SummaryCard label="Capital Available" value={formatCurrency(capital.capitalAvailable)} tone="good" />
         <SummaryCard label="Customers Funded" value={capital.customersFunded} />
         <SummaryCard label="Contracts Funded" value={capital.contractsFunded} />
         <SummaryCard label="Customer Collections" value={formatCurrency(capital.customerCollections)} tone="good" />
         <SummaryCard label="Outstanding" value={formatCurrency(capital.outstanding)} tone="bad" />
         <SummaryCard label="Paid Installments" value={installmentStats.PAID} tone="good" />
-        <SummaryCard label="Partial Installments" value={installmentStats.PARTIAL} tone="warn" />
-        <SummaryCard label="Missed Installments" value={installmentStats.MISSED} tone="bad" />
-        <SummaryCard label="Overdue Installments" value={installmentStats.OVERDUE} tone="bad" />
       </section>
-
-      {/* Profit section — kept visually and conceptually separate from capital above,
-          per the rule that capital and profit are never mixed. */}
-      {profit && (
-        <section>
-          <h2 className="font-semibold text-sm text-gray-500 mb-2">PROFIT (50/50 OWNER / INVESTOR SPLIT)</h2>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-            <SummaryCard label="Total Profit Generated" value={formatCurrency(profit.totalProfitGenerated)} />
-            <SummaryCard label="Investor 50% Profit" value={formatCurrency(profit.investorProfitShare)} tone="good" />
-            <SummaryCard label="Owner 50% Profit" value={formatCurrency(profit.ownerProfitShare)} />
-            <SummaryCard label="Investor Withdrawn" value={formatCurrency(profit.investorProfitWithdrawn)} tone="warn" />
-            <SummaryCard label="Owner Withdrawn" value={formatCurrency(profit.ownerProfitWithdrawn)} tone="warn" />
-            <SummaryCard label="Investor Remaining" value={formatCurrency(profit.investorRemainingProfit)} tone="good" />
-            <SummaryCard label="Owner Remaining" value={formatCurrency(profit.ownerRemainingProfit)} tone="good" />
-          </div>
-        </section>
-      )}
 
       {/* Tabs */}
       <div className="flex gap-1 flex-wrap no-print">
@@ -155,8 +287,11 @@ export default function InvestorDetails() {
       {tab === 'Reports' && <ReportsTab investorId={id} />}
 
       {showTxModal && (
-        <AddTransactionModal
-          investorId={id}
+        <TransactionModal
+          investor={investor}
+          capital={capital}
+          profit={profit}
+          defaultType={txModalType}
           onClose={() => setShowTxModal(false)}
           onSuccess={() => {
             setShowTxModal(false);

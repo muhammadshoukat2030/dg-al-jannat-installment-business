@@ -2,40 +2,213 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  /* LIGHT MODE — Purple + Lavender + Teal Palette */
+  --bg-main: #F7F5FF;
+  --bg-sidebar: #EEE9FF;
+  --bg-card: #FFFFFF;
+  --bg-card-hover: #F5F0FF;
+  --accent-primary: #6C4CF1;
+  --accent-primary-hover: #5938DF;
+  --accent-secondary: #A855F7;
+  --accent-additional: #14B8A6;
+  --text-primary: #211B3A;
+  --text-secondary: #756F86;
+  --border-color: #E7E1F2;
+
+  --primary-50: #F5F0FF;
+  --primary-100: #EEE9FF;
+  --primary-500: #A855F7;
+  --primary-600: #6C4CF1;
+  --primary-700: #5938DF;
+}
+
+.dark {
+  /* DARK MODE — Strictly unchanged: Midnight Emerald */
+  --bg-main: #101B1A;
+  --bg-sidebar: #142824;
+  --bg-card: #1B302B;
+  --bg-card-hover: #254139;
+  --accent-primary: #10B981;
+  --accent-primary-hover: #059669;
+  --accent-secondary: #34D399;
+  --accent-additional: #10B981;
+  --text-primary: #F0FDF4;
+  --text-secondary: #A7BDB4;
+  --border-color: #2B4940;
+
+  --primary-50: #142824;
+  --primary-100: #1B302B;
+  --primary-500: #34D399;
+  --primary-600: #10B981;
+  --primary-700: #059669;
+}
+
 @layer base {
   html {
     @apply overflow-x-hidden;
+    font-size: 14px; /* Crisp, slightly reduced global scale */
   }
   body {
-    @apply bg-gray-50 text-gray-900 dark:bg-gray-950 dark:text-gray-100 transition-colors overflow-x-hidden;
+    background-color: var(--bg-main);
+    color: var(--text-primary);
+    line-height: 1.45;
+    @apply transition-colors overflow-x-hidden antialiased;
+  }
+
+  h1 {
+    @apply text-lg sm:text-xl font-bold tracking-tight;
+  }
+  h2 {
+    @apply text-xs sm:text-sm font-semibold tracking-tight;
+  }
+  h3 {
+    @apply text-xs sm:text-xs font-semibold;
   }
 }
 
 @layer components {
   .card {
-    @apply bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm p-4;
+    background-color: var(--bg-card);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    @apply rounded-xl shadow-sm p-3.5 sm:p-4 transition-colors;
   }
   .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-xs sm:text-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed min-h-[34px] sm:min-h-[36px];
   }
   .btn-primary {
-    @apply btn bg-primary-600 text-white hover:bg-primary-700;
+    background-color: var(--accent-primary);
+    color: #ffffff;
+    @apply btn hover:opacity-95 shadow-sm active:scale-[0.98];
+  }
+  .btn-primary:hover {
+    background-color: var(--accent-primary-hover);
   }
   .btn-secondary {
-    @apply btn bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700;
+    background-color: var(--bg-card-hover);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    @apply btn hover:opacity-90 active:scale-[0.98];
+  }
+  .btn-secondary:hover {
+    background-color: var(--bg-sidebar);
+  }
+  .btn-teal {
+    background-color: var(--accent-additional);
+    color: #ffffff;
+    @apply btn hover:opacity-90 shadow-sm active:scale-[0.98];
   }
   .btn-danger {
-    @apply btn bg-red-600 text-white hover:bg-red-700;
+    @apply btn bg-red-600 text-white hover:bg-red-700 shadow-sm active:scale-[0.98];
   }
   .input {
-    @apply w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500;
+    background-color: var(--bg-card);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    @apply w-full rounded-lg px-3 py-1.5 text-xs sm:text-sm focus:outline-none transition-colors;
+  }
+  .input:focus {
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 2px var(--accent-secondary);
   }
   .label {
-    @apply block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1;
+    color: var(--text-primary);
+    @apply block text-xs font-medium mb-1;
   }
   .badge {
-    @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium;
+    @apply inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium leading-none;
   }
+
+  /* Sidebar Active Navigation Item Styles */
+  .sidebar-nav-item-active {
+    background-color: #6C4CF1 !important;
+    color: #ffffff !important;
+  }
+  .sidebar-nav-item-active svg {
+    color: #ffffff !important;
+    stroke: #ffffff !important;
+  }
+  .dark .sidebar-nav-item-active {
+    background-color: rgba(16, 185, 129, 0.22) !important;
+    color: #34D399 !important;
+    border: 1px solid rgba(16, 185, 129, 0.35);
+  }
+  .dark .sidebar-nav-item-active svg {
+    color: #34D399 !important;
+    stroke: #34D399 !important;
+  }
+}
+
+/* Global utility overrides to guarantee 100% theme consistency across legacy/Tailwind classes */
+.bg-white {
+  background-color: var(--bg-card) !important;
+}
+.dark .dark\:bg-gray-900,
+.dark .dark\:bg-gray-800 {
+  background-color: var(--bg-card) !important;
+}
+
+.bg-gray-50 {
+  background-color: var(--bg-main) !important;
+}
+.dark .dark\:bg-gray-950 {
+  background-color: var(--bg-main) !important;
+}
+
+.hover\:bg-gray-50:hover,
+.hover\:bg-gray-100:hover {
+  background-color: var(--bg-card-hover) !important;
+}
+.dark .dark\:hover\:bg-gray-800:hover,
+.dark .dark\:hover\:bg-gray-700:hover,
+.dark .dark\:hover\:bg-gray-800\/50:hover {
+  background-color: var(--bg-card-hover) !important;
+}
+
+.border-gray-100,
+.border-gray-200,
+.border-gray-300 {
+  border-color: var(--border-color) !important;
+}
+.dark .dark\:border-gray-700,
+.dark .dark\:border-gray-800,
+.dark .dark\:border-gray-700\/80 {
+  border-color: var(--border-color) !important;
+}
+
+.text-gray-900 {
+  color: var(--text-primary) !important;
+}
+.dark .dark\:text-gray-100,
+.dark .dark\:text-gray-200 {
+  color: var(--text-primary) !important;
+}
+
+.text-gray-500,
+.text-gray-400 {
+  color: var(--text-secondary) !important;
+}
+.dark .dark\:text-gray-400,
+.dark .dark\:text-gray-500,
+.dark .dark\:text-gray-300 {
+  color: var(--text-secondary) !important;
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-secondary);
 }
 
 @media print {
