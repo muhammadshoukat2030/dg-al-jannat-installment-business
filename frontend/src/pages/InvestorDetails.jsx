@@ -10,6 +10,17 @@ import DeleteInvestorModal from '../components/investors/DeleteInvestorModal';
 import DateFilterBar from '../components/common/DateFilterBar';
 import WithdrawalModal from '../components/investors/WithdrawalModal';
 import TransactionModal from '../components/investors/TransactionModal';
+import {
+  getInvestorOffline,
+  queryInvestorTransactionsOffline,
+  queryPlansOffline,
+  queryInstallmentsOffline,
+  queryPaymentsOffline,
+  queryWithdrawalsOffline,
+  put,
+  enqueueOperation,
+} from '../offline/db';
+import { refreshPendingCount } from '../offline/syncManager';
 
 const TABS = [
   'Overview',
@@ -38,12 +49,33 @@ export default function InvestorDetails() {
   const [showWithdrawModal, setShowWithdrawModal] = useState(false);
 
   const load = useCallback(async () => {
-    const res = await investorApi.get(id);
-    setInvestor(res.data.data.investor);
-    setCapital(res.data.data.capital);
-    setInstallmentStats(res.data.data.installmentStats);
-    const profitRes = await investorApi.profit(id);
-    setProfit(profitRes.data.data);
+    // 1. Immediate local-first load from IndexedDB
+    try {
+      const local = await getInvestorOffline(id);
+      if (local && local.investor) {
+        setInvestor(local.investor);
+        setCapital(local.capital);
+        setInstallmentStats(local.installmentStats);
+        setProfit(local.profit);
+        setLoading(false);
+      }
+    } catch {
+      // IndexedDB fallback failed or not ready
+    }
+
+    // 2. Network revalidation when online
+    try {
+      const res = await investorApi.get(id);
+      setInvestor(res.data.data.investor);
+      setCapital(res.data.data.capital);
+      setInstallmentStats(res.data.data.installmentStats);
+      const profitRes = await investorApi.profit(id);
+      setProfit(profitRes.data.data);
+    } catch {
+      // Retain existing local data if offline
+    } finally {
+      setLoading(false);
+    }
   }, [id]);
 
   useEffect(() => {
@@ -371,12 +403,23 @@ function TransactionsTab({ investorId, onChanged }) {
 
   useEffect(() => {
     setLoading(true);
+    // 1. Local-first load from IndexedDB
+    queryInvestorTransactionsOffline({ investorId, page, limit: 20 }).then((local) => {
+      if (local && local.data.length > 0) {
+        setTransactions(local.data);
+        setPages(local.pages);
+        setLoading(false);
+      }
+    }).catch(() => {});
+
+    // 2. Server revalidate
     investorApi
       .listTransactions(investorId, { page, limit: 20, ...dateFilter })
       .then((res) => {
         setTransactions(res.data.data);
         setPages(res.data.pages || 1);
       })
+      .catch(() => {})
       .finally(() => setLoading(false));
   }, [investorId, page, dateFilter]);
 
@@ -499,9 +542,19 @@ function FundedContractsTab({ investorId }) {
   useEffect(() => {
     const timer = setTimeout(() => {
       setLoading(true);
+      // 1. Local-first load
+      queryPlansOffline({ investorId, search, page: 1, limit: 50 }).then((local) => {
+        if (local && local.data.length > 0) {
+          setRows(local.data);
+          setLoading(false);
+        }
+      }).catch(() => {});
+
+      // 2. Server revalidation
       investorApi
         .fundedContracts(investorId, { page: 1, limit: 50, search, ...dateFilter })
         .then((res) => setRows(res.data.data))
+        .catch(() => {})
         .finally(() => setLoading(false));
     }, 300);
     return () => clearTimeout(timer);
@@ -562,9 +615,19 @@ function InstallmentsTab({ investorId }) {
 
   useEffect(() => {
     setLoading(true);
+    // 1. Local-first load
+    queryInstallmentsOffline({ status: status || undefined }).then((local) => {
+      if (local && local.length > 0) {
+        setRows(local);
+        setLoading(false);
+      }
+    }).catch(() => {});
+
+    // 2. Server revalidation
     investorApi
       .installments(investorId, { page: 1, limit: 100, status: status || undefined, ...dateFilter })
       .then((res) => setRows(res.data.data))
+      .catch(() => {})
       .finally(() => setLoading(false));
   }, [investorId, status, dateFilter]);
 
@@ -625,9 +688,19 @@ function PaymentsTab({ investorId }) {
 
   useEffect(() => {
     setLoading(true);
+    // 1. Local-first load
+    queryPaymentsOffline({ page: 1, limit: 100 }).then((local) => {
+      if (local && local.data.length > 0) {
+        setRows(local.data);
+        setLoading(false);
+      }
+    }).catch(() => {});
+
+    // 2. Server revalidation
     investorApi
       .payments(investorId, { page: 1, limit: 100, ...dateFilter })
       .then((res) => setRows(res.data.data))
+      .catch(() => {})
       .finally(() => setLoading(false));
   }, [investorId, dateFilter]);
 
@@ -671,9 +744,19 @@ function OutstandingTab({ investorId }) {
 
   useEffect(() => {
     setLoading(true);
+    // 1. Local-first load
+    queryPlansOffline({ investorId, page: 1, limit: 200 }).then((local) => {
+      if (local && local.data.length > 0) {
+        setRows(local.data.filter((c) => c.remainingAmount > 0));
+        setLoading(false);
+      }
+    }).catch(() => {});
+
+    // 2. Server revalidation
     investorApi
       .fundedContracts(investorId, { page: 1, limit: 200, ...dateFilter })
       .then((res) => setRows(res.data.data.filter((c) => c.remainingAmount > 0)))
+      .catch(() => {})
       .finally(() => setLoading(false));
   }, [investorId, dateFilter]);
 
@@ -719,9 +802,19 @@ function WithdrawalsTab({ investorId }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // 1. Local-first load
+    queryWithdrawalsOffline({ investorId, page: 1, limit: 100 }).then((local) => {
+      if (local && local.data.length > 0) {
+        setRows(local.data);
+        setLoading(false);
+      }
+    }).catch(() => {});
+
+    // 2. Server revalidation
     investorApi
       .withdrawals(investorId, { page: 1, limit: 100 })
       .then((res) => setRows(res.data.data))
+      .catch(() => {})
       .finally(() => setLoading(false));
   }, [investorId]);
 
@@ -828,7 +921,29 @@ function AddTransactionModal({ investorId, onClose, onSuccess }) {
       return;
     }
     setSaving(true);
+    const operationId = 'op_inv_tx_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
     try {
+      if (!navigator.onLine) {
+        const localTx = {
+          _id: 'local_' + operationId,
+          investorId,
+          transactionType,
+          amount: Number(amount),
+          transactionDate: transactionDate || new Date().toISOString(),
+          notes: notes || '',
+          operationId,
+        };
+        await put('investorTransactions', localTx);
+        await enqueueOperation({
+          operationId,
+          type: 'ADD_INVESTOR_TRANSACTION',
+          payload: { investorId, transactionType, amount: Number(amount), transactionDate, notes },
+        });
+        await refreshPendingCount();
+        toast.success('Transaction saved offline. Will sync automatically.');
+        onSuccess();
+        return;
+      }
       await investorApi.addTransaction(investorId, { transactionType, amount: Number(amount), transactionDate, notes });
       toast.success('Transaction recorded.');
       onSuccess();

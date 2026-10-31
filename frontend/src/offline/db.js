@@ -5,7 +5,7 @@
  */
 
 const DB_NAME = 'ims_offline_db';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 let dbPromise = null;
 
@@ -66,7 +66,32 @@ export function openDB() {
         store.createIndex('name', 'name', { unique: false });
       }
 
-      // 6. Sync Queue store (stores offline mutations waiting to be synced)
+      // 6. Investor Transactions store
+      if (!db.objectStoreNames.contains('investorTransactions')) {
+        const store = db.createObjectStore('investorTransactions', { keyPath: '_id' });
+        store.createIndex('investorId', 'investorId', { unique: false });
+        store.createIndex('transactionDate', 'transactionDate', { unique: false });
+      }
+
+      // 7. Withdrawals store
+      if (!db.objectStoreNames.contains('withdrawals')) {
+        const store = db.createObjectStore('withdrawals', { keyPath: '_id' });
+        store.createIndex('investorId', 'investorId', { unique: false });
+        store.createIndex('source', 'source', { unique: false });
+      }
+
+      // 8. Owner Transactions store
+      if (!db.objectStoreNames.contains('ownerTransactions')) {
+        const store = db.createObjectStore('ownerTransactions', { keyPath: '_id' });
+        store.createIndex('transactionDate', 'transactionDate', { unique: false });
+      }
+
+      // 9. Reports Cache store
+      if (!db.objectStoreNames.contains('reportsCache')) {
+        db.createObjectStore('reportsCache', { keyPath: 'key' });
+      }
+
+      // 10. Sync Queue store (stores offline mutations waiting to be synced)
       if (!db.objectStoreNames.contains('syncQueue')) {
         const store = db.createObjectStore('syncQueue', { keyPath: 'operationId' });
         store.createIndex('status', 'status', { unique: false });
@@ -74,12 +99,12 @@ export function openDB() {
         store.createIndex('type', 'type', { unique: false });
       }
 
-      // 7. Metadata store (key-value store for sync timestamps, cached summaries)
+      // 11. Metadata store (key-value store for sync timestamps, cached summaries, settings)
       if (!db.objectStoreNames.contains('syncMetadata')) {
         db.createObjectStore('syncMetadata', { keyPath: 'key' });
       }
 
-      // 8. Conflicts store
+      // 12. Conflicts store
       if (!db.objectStoreNames.contains('conflicts')) {
         db.createObjectStore('conflicts', { keyPath: 'operationId' });
       }
@@ -344,6 +369,249 @@ export async function queryInvestorsOffline({ search, page = 1, limit = 20 } = {
 
   return {
     data,
+    total,
+    page,
+    pages: Math.ceil(total / limit) || 1,
+  };
+}
+
+export async function queryInvestorTransactionsOffline({ investorId, page = 1, limit = 20 } = {}) {
+  const all = await getAll('investorTransactions');
+  let filtered = all;
+  if (investorId) {
+    filtered = filtered.filter((t) => t.investorId === investorId || t.investorId?._id === investorId);
+  }
+  filtered.sort((a, b) => new Date(b.transactionDate || b.createdAt || 0) - new Date(a.transactionDate || a.createdAt || 0));
+  const total = filtered.length;
+  const skip = (page - 1) * limit;
+  return {
+    data: filtered.slice(skip, skip + limit),
+    total,
+    page,
+    pages: Math.ceil(total / limit) || 1,
+  };
+}
+
+export async function queryWithdrawalsOffline({ investorId, source, page = 1, limit = 20 } = {}) {
+  const all = await getAll('withdrawals');
+  let filtered = all;
+  if (investorId) {
+    filtered = filtered.filter((w) => w.investorId === investorId || w.investorId?._id === investorId);
+  }
+  if (source) {
+    filtered = filtered.filter((w) => w.source === source);
+  }
+  filtered.sort((a, b) => new Date(b.withdrawalDate || b.createdAt || 0) - new Date(a.withdrawalDate || a.createdAt || 0));
+  const total = filtered.length;
+  const skip = (page - 1) * limit;
+  return {
+    data: filtered.slice(skip, skip + limit),
+    total,
+    page,
+    pages: Math.ceil(total / limit) || 1,
+  };
+}
+
+export async function queryOwnerTransactionsOffline({ page = 1, limit = 20 } = {}) {
+  const all = await getAll('ownerTransactions');
+  const sorted = all.sort((a, b) => new Date(b.transactionDate || b.createdAt || 0) - new Date(a.transactionDate || a.createdAt || 0));
+  const total = sorted.length;
+  const skip = (page - 1) * limit;
+  return {
+    data: sorted.slice(skip, skip + limit),
+    total,
+    page,
+    pages: Math.ceil(total / limit) || 1,
+  };
+}
+
+export async function getReportOffline(reportKey) {
+  const row = await get('reportsCache', reportKey);
+  return row ? row.data : null;
+}
+
+export async function setReportOffline(reportKey, data) {
+  return put('reportsCache', {
+    key: reportKey,
+    data,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+export async function getSettingsOffline() {
+  const settings = await getMetadata('businessSettings');
+  return settings || null;
+}
+
+export async function setSettingsOffline(settings) {
+  return setMetadata('businessSettings', settings);
+}
+
+export async function getOwnerDataOffline() {
+  return getMetadata('ownerData');
+}
+
+export async function setOwnerDataOffline(ownerData) {
+  return setMetadata('ownerData', ownerData);
+}
+
+export async function getInvestorOffline(id) {
+  const investor = await get('investors', id);
+  if (!investor) return null;
+
+  const cachedSummaries = (await getMetadata('cachedInvestorSummaries')) || {};
+  const cached = cachedSummaries[id] || cachedSummaries[String(id)];
+
+  const defaultCapital = {
+    capitalHeld: 0,
+    customersFunded: 0,
+    contractsFunded: 0,
+    customerCollections: 0,
+    outstanding: 0,
+    originalCapitalInvested: 0,
+    additionalCapitalAdded: 0,
+    totalCapitalReturned: 0,
+    capitalDeployed: 0,
+    recoveredCapital: 0,
+    capitalStillDeployed: 0,
+    capitalAvailable: 0,
+    totalSale: 0,
+    totalCost: 0,
+    expectedProfit: 0,
+    expectedLoss: 0,
+  };
+
+  const defaultInstallmentStats = {
+    PAID: 0,
+    PENDING: 0,
+    OVERDUE: 0,
+    MISSED: 0,
+    PARTIAL: 0,
+  };
+
+  const defaultProfit = {
+    investorProfitShare: 0,
+    investorProfitCashWithdrawn: 0,
+    investorProfitToCapital: 0,
+    investorRemainingProfit: 0,
+  };
+
+  return {
+    investor: cached?.investor || investor,
+    capital: cached?.capital || defaultCapital,
+    installmentStats: cached?.installmentStats || defaultInstallmentStats,
+    profit: cached?.profit || defaultProfit,
+  };
+}
+
+export async function queryPlansOffline({ customerId, investorId, status, search, page = 1, limit = 20 } = {}) {
+  const all = await getAll('installmentPlans');
+  let filtered = all.filter((p) => !p.isDeleted);
+
+  if (customerId) {
+    filtered = filtered.filter((p) => p.customerId === customerId || p.customerId?._id === customerId);
+  }
+  if (investorId) {
+    filtered = filtered.filter((p) => p.investorId === investorId || p.investorId?._id === investorId);
+  }
+  if (status) {
+    filtered = filtered.filter((p) => p.status === status);
+  }
+  if (search && search.trim()) {
+    const s = search.toLowerCase().trim();
+    filtered = filtered.filter(
+      (p) =>
+        (p.contractId && p.contractId.toLowerCase().includes(s)) ||
+        (p.productName && p.productName.toLowerCase().includes(s)) ||
+        (p.customerId?.name && p.customerId.name.toLowerCase().includes(s))
+    );
+  }
+
+  filtered.sort((a, b) => new Date(b.startDate || b.createdAt || 0) - new Date(a.startDate || a.createdAt || 0));
+  const total = filtered.length;
+  const skip = (page - 1) * limit;
+  return {
+    data: filtered.slice(skip, skip + limit),
+    total,
+    page,
+    pages: Math.ceil(total / limit) || 1,
+  };
+}
+
+export async function queryOwnerFundedContractsOffline({ search, status, page = 1, limit = 20 } = {}) {
+  const all = await getAll('installmentPlans');
+  let filtered = all.filter((p) => !p.isDeleted && (!p.investorId || p.fundingSource === 'BUSINESS' || p.fundingSource === 'OWNER'));
+
+  if (status) {
+    filtered = filtered.filter((p) => p.status === status);
+  }
+  if (search && search.trim()) {
+    const s = search.toLowerCase().trim();
+    filtered = filtered.filter(
+      (p) =>
+        (p.contractId && p.contractId.toLowerCase().includes(s)) ||
+        (p.productName && p.productName.toLowerCase().includes(s)) ||
+        (p.customerId?.name && p.customerId.name.toLowerCase().includes(s))
+    );
+  }
+
+  filtered.sort((a, b) => new Date(b.startDate || b.createdAt || 0) - new Date(a.startDate || a.createdAt || 0));
+  const total = filtered.length;
+  const skip = (page - 1) * limit;
+  return {
+    data: filtered.slice(skip, skip + limit),
+    total,
+    page,
+    pages: Math.ceil(total / limit) || 1,
+  };
+}
+
+export async function queryOwnerFundedCustomersOffline({ search, page = 1, limit = 20 } = {}) {
+  const [plans, customers] = await Promise.all([
+    getAll('installmentPlans'),
+    getAll('customers'),
+  ]);
+
+  const customerMap = new Map();
+  customers.forEach((c) => customerMap.set(String(c._id), c));
+
+  const ownerPlans = plans.filter((p) => !p.isDeleted && (!p.investorId || p.fundingSource === 'BUSINESS' || p.fundingSource === 'OWNER'));
+
+  const grouped = new Map();
+  ownerPlans.forEach((plan) => {
+    const cid = String(plan.customerId?._id || plan.customerId);
+    if (!grouped.has(cid)) {
+      grouped.set(cid, {
+        customer: customerMap.get(cid) || plan.customerId || { _id: cid, name: 'Unknown Customer' },
+        contractsFunded: 0,
+        deployed: 0,
+        collected: 0,
+        outstanding: 0,
+      });
+    }
+    const entry = grouped.get(cid);
+    entry.contractsFunded += 1;
+    entry.deployed += Number(plan.purchaseCost || 0);
+    entry.collected += Number(plan.totalPaid || 0) + Number(plan.downPayment || 0);
+    entry.outstanding += Number(plan.remainingAmount || 0);
+  });
+
+  let rows = Array.from(grouped.values());
+
+  if (search && search.trim()) {
+    const s = search.toLowerCase().trim();
+    rows = rows.filter(
+      (r) =>
+        (r.customer?.name && r.customer.name.toLowerCase().includes(s)) ||
+        (r.customer?.contactNumber && r.customer.contactNumber.includes(s)) ||
+        (r.customer?.customerId && r.customer.customerId.toLowerCase().includes(s))
+    );
+  }
+
+  const total = rows.length;
+  const skip = (page - 1) * limit;
+  return {
+    data: rows.slice(skip, skip + limit),
     total,
     page,
     pages: Math.ceil(total / limit) || 1,

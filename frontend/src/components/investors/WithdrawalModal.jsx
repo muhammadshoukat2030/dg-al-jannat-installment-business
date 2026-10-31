@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import { investorApi, withdrawalApi } from '../../api/services';
 import { formatCurrency } from '../../utils/format';
+import { queryInvestorsOffline, put, enqueueOperation } from '../../offline/db';
+import { refreshPendingCount } from '../../offline/syncManager';
 
 /**
  * Withdrawal entry form. The Owner/Investor split is ALWAYS exactly 50/50 and is
@@ -22,7 +24,10 @@ export default function WithdrawalModal({ investorId: fixedInvestorId, onClose, 
 
   useEffect(() => {
     if (fixedInvestorId) return;
-    investorApi.list({ status: 'active', limit: 100 }).then((res) => setInvestors(res.data.data));
+    queryInvestorsOffline({ limit: 100 }).then((local) => {
+      if (local && local.data.length > 0) setInvestors(local.data);
+    }).catch(() => {});
+    investorApi.list({ status: 'active', limit: 100 }).then((res) => setInvestors(res.data.data)).catch(() => {});
   }, [fixedInvestorId]);
 
   useEffect(() => {
@@ -30,7 +35,7 @@ export default function WithdrawalModal({ investorId: fixedInvestorId, onClose, 
       setProfile(null);
       return;
     }
-    investorApi.profit(investorId).then((res) => setProfile(res.data.data));
+    investorApi.profit(investorId).then((res) => setProfile(res.data.data)).catch(() => {});
   }, [investorId]);
 
   const total = Number(totalAmount) || 0;
@@ -49,6 +54,32 @@ export default function WithdrawalModal({ investorId: fixedInvestorId, onClose, 
     }
     setSaving(true);
     try {
+      if (!navigator.onLine) {
+        const operationId = 'op_with_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+        const localWithdrawal = {
+          _id: 'local_' + operationId,
+          investorId,
+          totalAmount: total,
+          ownerAmount: ownerShare,
+          investorAmount: investorShare,
+          withdrawalDate: withdrawalDate || new Date().toISOString(),
+          reference: reference || '',
+          notes: notes || '',
+          status: 'COMPLETED',
+          operationId,
+        };
+        await put('withdrawals', localWithdrawal);
+        await enqueueOperation({
+          operationId,
+          type: 'RECORD_WITHDRAWAL',
+          payload: { investorId, totalAmount: total, withdrawalDate, reference, notes },
+        });
+        await refreshPendingCount();
+        toast.success('Withdrawal saved offline. Will sync automatically when online.');
+        onSuccess();
+        return;
+      }
+
       await withdrawalApi.create({ investorId, totalAmount: total, withdrawalDate, reference, notes });
       toast.success('Profit withdrawn and transferred to available capital.');
       onSuccess();

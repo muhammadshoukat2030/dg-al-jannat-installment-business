@@ -5,6 +5,7 @@ import { FileText, Download, ArrowLeft } from 'lucide-react';
 import { ownerApi, ownerExportApi } from '../api/services';
 import { formatCurrency, formatDate } from '../utils/format';
 import StatusBadge from '../components/common/StatusBadge';
+import { queryOwnerFundedContractsOffline, getOwnerDataOffline } from '../offline/db';
 
 export default function OwnerFundedContracts() {
   const [data, setData] = useState([]);
@@ -17,8 +18,27 @@ export default function OwnerFundedContracts() {
   const [exporting, setExporting] = useState(false);
   const limit = 20;
 
-  function load() {
+  async function load() {
     setLoading(true);
+    // 1. Immediate local-first load from IndexedDB
+    try {
+      const [localContracts, localOwnerData] = await Promise.all([
+        queryOwnerFundedContractsOffline({ search, status, page, limit }),
+        getOwnerDataOffline(),
+      ]);
+      if (localContracts && localContracts.data.length > 0) {
+        setData(localContracts.data);
+        setTotal(localContracts.total);
+        setLoading(false);
+      }
+      if (localOwnerData?.fundedSummary) {
+        setSummary(localOwnerData.fundedSummary);
+      }
+    } catch {
+      // fallback
+    }
+
+    // 2. Server revalidation
     Promise.all([
       ownerApi.fundedContracts({ search, status, page, limit }),
       ownerApi.fundedSummary(),
@@ -28,7 +48,9 @@ export default function OwnerFundedContracts() {
         setTotal(contractsRes.data.total);
         setSummary(summaryRes.data.data);
       })
-      .catch(() => toast.error('Failed to load contracts.'))
+      .catch(() => {
+        // retain local data if offline
+      })
       .finally(() => setLoading(false));
   }
 
