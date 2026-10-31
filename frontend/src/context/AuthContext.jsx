@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import client from '../api/client';
+import { getPendingOperations } from '../offline/db';
 
 const AuthContext = createContext(null);
 
@@ -35,7 +36,15 @@ export function AuthProvider({ children }) {
     return res.data;
   }
 
-  function logout() {
+  async function logout() {
+    try {
+      const pending = await getPendingOperations();
+      if (pending && pending.length > 0) {
+        console.warn(`Logout notice: ${pending.length} pending offline operations remain safely queued in IndexedDB.`);
+      }
+    } catch {
+      // Best effort
+    }
     localStorage.removeItem('ims_token');
     localStorage.removeItem('ims_admin');
     setAdmin(null);

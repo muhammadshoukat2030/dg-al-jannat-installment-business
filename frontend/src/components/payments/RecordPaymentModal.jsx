@@ -2,6 +2,8 @@ import { useState } from 'react';
 import toast from 'react-hot-toast';
 import { installmentApi } from '../../api/services';
 import { formatCurrency, formatDate } from '../../utils/format';
+import { enqueueOperation, put } from '../../offline/db';
+import { refreshPendingCount } from '../../offline/syncManager';
 
 export default function RecordPaymentModal({ installment, onClose, onSuccess }) {
   const outstanding = Math.round((installment.amountDue - installment.paidAmount) * 100) / 100;
@@ -19,14 +21,88 @@ export default function RecordPaymentModal({ installment, onClose, onSuccess }) 
       return;
     }
     setSaving(true);
+    const operationId = `op_pay_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+
+    if (navigator.onLine) {
+      try {
+        const res = await installmentApi.pay(installment._id, {
+          amount: numAmount,
+          paymentMethod: method,
+          paymentDate,
+          notes,
+          operationId,
+        });
+
+        // Cache server-confirmed payment locally in IndexedDB
+        if (res.data?.data?.payment) {
+          await put('payments', res.data.data.payment);
+        }
+        if (res.data?.data?.installment) {
+          await put('installments', res.data.data.installment);
+        }
+
+        toast.success('Payment recorded.');
+        onSuccess();
+        return;
+      } catch (err) {
+        // If not a network error (e.g. 400 Bad Request validation from server), throw error directly
+        if (err.response && err.response.status >= 400 && err.response.status < 500) {
+          toast.error(err.response?.data?.message || 'Failed to record payment.');
+          setSaving(false);
+          return;
+        }
+        // If network failed midway, fall through to offline queueing below
+      }
+    }
+
+    // Offline mode or sudden network drop: Queue offline payment in IndexedDB
     try {
-      // paymentDate is the date the customer actually paid — deliberately separate from
-      // the record's createdAt/entry timestamp, since admins often log payments later.
-      await installmentApi.pay(installment._id, { amount: numAmount, paymentMethod: method, paymentDate, notes });
-      toast.success('Payment recorded.');
+      await enqueueOperation({
+        type: 'RECORD_PAYMENT',
+        payload: {
+          installmentId: installment._id,
+          amount: numAmount,
+          paymentMethod: method,
+          paymentDate,
+          notes,
+        },
+        localId: operationId,
+      });
+
+      // Optimistically update installment in local IndexedDB
+      const updatedPaid = Math.round(((installment.paidAmount || 0) + numAmount) * 100) / 100;
+      const updatedRemaining = Math.max(0, Math.round(((installment.amountDue || 0) - updatedPaid) * 100) / 100);
+      const localUpdatedInstallment = {
+        ...installment,
+        paidAmount: updatedPaid,
+        remainingAmount: updatedRemaining,
+        status: updatedRemaining <= 0 ? 'PAID' : 'PARTIAL',
+        paymentDate: new Date(paymentDate),
+        updatedAt: new Date().toISOString(),
+      };
+      await put('installments', localUpdatedInstallment);
+
+      // Save local pending payment representation
+      await put('payments', {
+        _id: `local_${operationId}`,
+        installmentId: installment._id,
+        planId: installment.planId,
+        customerId: installment.customerId,
+        amount: numAmount,
+        paymentDate: new Date(paymentDate),
+        paymentMethod: method,
+        receiptNumber: 'SYNC-PENDING',
+        notes: notes || '',
+        operationId,
+        isPendingSync: true,
+        createdAt: new Date().toISOString(),
+      });
+
+      await refreshPendingCount();
+      toast.success('Offline mode: Payment saved locally — will sync automatically when online.');
       onSuccess();
-    } catch (err) {
-      toast.error(err.response?.data?.message || 'Failed to record payment.');
+    } catch (offlineErr) {
+      toast.error('Failed to save payment locally: ' + offlineErr.message);
     } finally {
       setSaving(false);
     }

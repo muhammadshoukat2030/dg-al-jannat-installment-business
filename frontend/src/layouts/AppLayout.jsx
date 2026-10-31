@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
+import SyncStatusIndicator from '../components/common/SyncStatusIndicator';
 
 const navItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
@@ -197,6 +198,9 @@ export default function AppLayout() {
           </div>
 
           <div className="flex items-center gap-3">
+            {/* Offline-First Sync Status Indicator */}
+            <SyncStatusIndicator />
+
             {/* Theme Toggle Button */}
             <button
               onClick={toggleTheme}
