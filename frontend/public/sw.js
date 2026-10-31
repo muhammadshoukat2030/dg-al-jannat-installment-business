@@ -4,7 +4,7 @@
  * and background synchronization triggers.
  */
 
-const CACHE_NAME = 'ims-static-v1';
+const CACHE_NAME = 'ims-static-v2';
 const PRECACHE_ASSETS = [
   '/',
   '/index.html',
@@ -13,6 +13,39 @@ const PRECACHE_ASSETS = [
   '/icons/icon-192.svg',
   '/icons/icon-512.svg',
 ];
+
+/**
+ * Safely writes a response to the cache with strict protocol validation
+ * and error suppression so failures never break fetch execution.
+ */
+async function safeCachePut(cacheName, request, response) {
+  try {
+    if (!request || !response) return;
+    if (request.method !== 'GET') return;
+
+    let url;
+    try {
+      url = new URL(request.url);
+    } catch {
+      return;
+    }
+
+    // Only cache http: and https: schemes (Cache API rejects chrome-extension:, etc.)
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      return;
+    }
+
+    // Only cache successful 200 OK responses
+    if (response.status !== 200 || response.type === 'error') {
+      return;
+    }
+
+    const cache = await caches.open(cacheName);
+    await cache.put(request, response.clone());
+  } catch (err) {
+    // Fail safely: A cache write failure must never crash or break the fetch event
+  }
+}
 
 // Install: Pre-cache application shell
 self.addEventListener('install', (event) => {
@@ -42,22 +75,41 @@ self.addEventListener('activate', (event) => {
 // Fetch: Strategy depending on request type
 self.addEventListener('fetch', (event) => {
   const { request } = event;
-  const url = new URL(request.url);
 
-  // 1. Never intercept API requests with HTTP cache — structured data is managed by IndexedDB
+  // 1. Only process GET requests (Cache API only supports GET)
+  if (request.method !== 'GET') {
+    return;
+  }
+
+  let url;
+  try {
+    url = new URL(request.url);
+  } catch {
+    return;
+  }
+
+  // 2. Ignore non-HTTP/HTTPS protocols (chrome-extension:, moz-extension:, data:, blob:, file:, etc.)
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    return;
+  }
+
+  // 3. Never intercept API requests with HTTP cache — structured data is managed by IndexedDB
   if (url.pathname.startsWith('/api/')) {
     return;
   }
 
-  // 2. Navigation requests (HTML document) — Network first with SPA fallback
+  // 4. Ignore cross-origin requests — application only caches same-origin app shell & assets
+  if (url.origin !== self.location.origin) {
+    return;
+  }
+
+  // 5. Navigation requests (HTML document) — Network first with SPA fallback
   if (request.mode === 'navigate') {
     event.respondWith(
       fetch(request)
         .then((response) => {
-          // If valid response, clone into cache
           if (response && response.status === 200) {
-            const copy = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+            safeCachePut(CACHE_NAME, request, response);
           }
           return response;
         })
@@ -79,7 +131,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // 3. Static Assets (JS, CSS, SVGs, Images, Fonts) — Cache-first with stale-while-revalidate
+  // 6. Static Assets (JS, CSS, SVGs, Images, Fonts) — Cache-first with stale-while-revalidate
   if (
     request.destination === 'script' ||
     request.destination === 'style' ||
@@ -94,7 +146,7 @@ self.addEventListener('fetch', (event) => {
           fetch(request)
             .then((networkResponse) => {
               if (networkResponse && networkResponse.status === 200) {
-                caches.open(CACHE_NAME).then((cache) => cache.put(request, networkResponse));
+                safeCachePut(CACHE_NAME, request, networkResponse);
               }
             })
             .catch(() => {});
@@ -104,8 +156,7 @@ self.addEventListener('fetch', (event) => {
         // Fetch from network and cache
         return fetch(request).then((networkResponse) => {
           if (networkResponse && networkResponse.status === 200) {
-            const copy = networkResponse.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+            safeCachePut(CACHE_NAME, request, networkResponse);
           }
           return networkResponse;
         });
@@ -114,7 +165,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Default: Network with cache fallback
+  // 7. Default for other same-origin requests: Network with cache fallback
   event.respondWith(
     fetch(request).catch(() => caches.match(request))
   );

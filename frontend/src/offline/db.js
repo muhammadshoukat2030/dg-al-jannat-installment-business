@@ -217,10 +217,10 @@ export async function setMetadata(key, value) {
 
 // ---------------- Sync Queue Helpers ----------------
 
-export async function enqueueOperation({ type, payload, localId }) {
-  const operationId = `op_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+export async function enqueueOperation({ type, payload, localId, operationId }) {
+  const opId = operationId || localId || `op_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
   const op = {
-    operationId,
+    operationId: opId,
     type,
     payload,
     localId: localId || null,
@@ -228,8 +228,16 @@ export async function enqueueOperation({ type, payload, localId }) {
     retryCount: 0,
     createdAt: new Date().toISOString(),
   };
-  await put('syncQueue', op);
-  return op;
+  try {
+    await put('syncQueue', op);
+    return op;
+  } catch (err) {
+    if (err && (err.name === 'QuotaExceededError' || err.code === 22)) {
+      console.error('Storage quota exceeded: Cannot persist offline mutation safely.', err);
+      throw new Error('Local browser storage quota is full. Operation cannot be safely saved offline.');
+    }
+    throw err;
+  }
 }
 
 export async function getPendingOperations() {
@@ -258,12 +266,34 @@ export async function requestStoragePersistence() {
     try {
       const isPersisted = await navigator.storage.persisted();
       if (!isPersisted) {
-        await navigator.storage.persist();
+        return await navigator.storage.persist();
       }
+      return isPersisted;
     } catch {
-      // Browser refused or unsupported; safely ignored
+      return false;
     }
   }
+  return false;
+}
+
+export async function getStorageQuotaEstimate() {
+  if (typeof navigator !== 'undefined' && navigator.storage && navigator.storage.estimate) {
+    try {
+      const estimate = await navigator.storage.estimate();
+      const usage = estimate.usage || 0;
+      const quota = estimate.quota || 0;
+      const percentUsed = quota > 0 ? Math.round((usage / quota) * 100) : 0;
+      return {
+        usage,
+        quota,
+        percentUsed,
+        isWarning: percentUsed > 80,
+      };
+    } catch {
+      return null;
+    }
+  }
+  return null;
 }
 
 // ---------------- Offline Local Query Helpers ----------------
