@@ -14,14 +14,15 @@ if (typeof window !== 'undefined' && 'serviceWorker' in navigator && import.meta
     navigator.serviceWorker
       .register('/sw.js')
       .then((reg) => {
-        // Handle background sync registration if supported
-        if ('sync' in reg) {
-          navigator.serviceWorker.addEventListener('message', (event) => {
-            if (event.data?.type === 'TRIGGER_BACKGROUND_SYNC') {
-              triggerSync();
-            }
-          });
-        }
+        // Check for updates on load
+        reg.update().catch(() => {});
+
+        // Handle background sync trigger from SW
+        navigator.serviceWorker.addEventListener('message', (event) => {
+          if (event.data?.type === 'TRIGGER_BACKGROUND_SYNC') {
+            triggerSync();
+          }
+        });
       })
       .catch((err) => {
         console.warn('Service worker registration failed:', err);
