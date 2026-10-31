@@ -12,7 +12,8 @@ import ShareMenu from '../components/common/ShareMenu';
 import DateFilterBar from '../components/common/DateFilterBar';
 import FundingAllocationEditor from '../components/investors/FundingAllocationEditor';
 import { DURATION_OPTIONS } from '../utils/durationOptions';
-import { get, getAll } from '../offline/db';
+import { get, getAll, archiveCustomerOffline, enqueueOperation } from '../offline/db';
+import { refreshPendingCount } from '../offline/syncManager';
 
 const TABS = ['Overview', 'Installments', 'Payments', 'Missed', 'Profit/Loss'];
 
@@ -39,9 +40,38 @@ export default function CustomerDetails() {
     try {
       const all = await getAll('installments');
       const filtered = all
-        .filter((i) => i.planId === pid || i.planId?._id === pid)
+        .filter((i) => String(i.planId?._id || i.planId) === String(pid))
         .sort((a, b) => (a.installmentNumber || 0) - (b.installmentNumber || 0));
       setSchedule(filtered);
+
+      const allPlans = await getAll('installmentPlans');
+      const currentPlan = allPlans.find((p) => String(p._id) === String(pid));
+      if (currentPlan) {
+        const totalCollected = Number(currentPlan.totalPaid || 0) + Number(currentPlan.downPayment || 0);
+        const expectedProfit = Number(currentPlan.expectedProfit || 0);
+        const realizedProfit = Math.min(expectedProfit, totalCollected);
+        const ownerProfit = Math.round(realizedProfit * 0.5);
+        const investorProfitPool = realizedProfit - ownerProfit;
+        const recoveredCapital = Math.max(0, totalCollected - expectedProfit);
+
+        setProfitDistribution({
+          planId: currentPlan._id,
+          totalExpectedProfit: expectedProfit,
+          totalCollected,
+          sellingPrice: currentPlan.sellingPrice,
+          realizedProfit,
+          ownerProfit,
+          investorProfitPool,
+          recoveredCapital,
+          capitalStillDeployed: Math.max(0, Number(currentPlan.purchaseCost || 0) - recoveredCapital),
+          investorShares: currentPlan.investorId ? [{
+            investorId: currentPlan.investorId,
+            fundedAmount: currentPlan.capitalDeployed || currentPlan.purchaseCost,
+            fundedSharePercent: 100,
+            profitShare: investorProfitPool,
+          }] : [],
+        });
+      }
     } catch {
       // Ignored
     }
@@ -60,17 +90,40 @@ export default function CustomerDetails() {
       setIsOfflineMode(false);
     } catch {
       // Offline fallback: load from IndexedDB
-      const [cachedCust, allPlans] = await Promise.all([
+      let [cachedCust, allPlans, allCusts] = await Promise.all([
         get('customers', id),
         getAll('installmentPlans'),
+        getAll('customers'),
       ]);
+
+      if (!cachedCust && allCusts) {
+        cachedCust = allCusts.find((c) => String(c._id) === String(id) || String(c.customerId) === String(id));
+      }
 
       if (cachedCust) {
         setCustomer(cachedCust);
-        const customerPlans = allPlans.filter(
-          (p) => p.customerId === id || p.customerId?._id === id
-        );
+        const targetId = String(cachedCust._id);
+        const targetCustId = String(cachedCust.customerId || '');
+        const customerPlans = allPlans.filter((p) => {
+          const planCid = String(p.customerId?._id || p.customerId);
+          return planCid === targetId || (targetCustId && planCid === targetCustId);
+        });
         setPlans(customerPlans);
+
+        // Derive authoritative customer summary statistics offline
+        const localSummary = {
+          totalContracts: customerPlans.length,
+          completedContracts: customerPlans.filter((p) => p.status === 'COMPLETED').length,
+          runningContracts: customerPlans.filter((p) => p.status === 'ACTIVE').length,
+          cancelledContracts: customerPlans.filter((p) => p.status === 'CANCELLED').length,
+          totalSale: customerPlans.reduce((sum, p) => sum + Number(p.sellingPrice || 0), 0),
+          totalPaid: customerPlans.reduce((sum, p) => sum + Number(p.totalPaid || 0) + Number(p.downPayment || 0), 0),
+          totalRemaining: customerPlans.reduce((sum, p) => sum + Number(p.remainingAmount || 0), 0),
+          totalExpectedProfit: customerPlans.reduce((sum, p) => sum + Number(p.expectedProfit || 0), 0),
+          totalExpectedLoss: customerPlans.reduce((sum, p) => sum + Number(p.expectedLoss || 0), 0),
+        };
+        setSummary(localSummary);
+
         if (customerPlans.length > 0) {
           const pid = activePlanId || customerPlans[0]._id;
           setActivePlanId(pid);
@@ -123,6 +176,19 @@ export default function CustomerDetails() {
   async function handleArchive() {
     if (!confirm('Archive this customer?')) return;
     try {
+      if (!navigator.onLine) {
+        const operationId = `op_arch_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+        await archiveCustomerOffline(id);
+        await enqueueOperation({
+          operationId,
+          type: 'ARCHIVE_CUSTOMER',
+          payload: { _id: id },
+        });
+        await refreshPendingCount();
+        toast.success('Customer archived offline.');
+        navigate('/customers');
+        return;
+      }
       await customerApi.archive(id);
       toast.success('Customer archived.');
       navigate('/customers');
@@ -557,7 +623,7 @@ function DurationEditModal({ plan, onClose, onSuccess }) {
     try {
       await planApi.changeDuration(plan._id, newDuration, true);
       toast.success('Duration updated.');
-      onSuccess();
+      if (typeof onSuccess === 'function') onSuccess();
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to update duration.');
     } finally {
@@ -590,7 +656,7 @@ function DurationEditModal({ plan, onClose, onSuccess }) {
           </p>
         )}
         <div className="flex justify-end gap-3">
-          <button className="btn-secondary" onClick={onClose}>
+          <button className="btn-secondary" onClick={() => typeof onClose === 'function' && onClose()}>
             Cancel
           </button>
           <button className="btn-primary" onClick={submit} disabled={saving}>
@@ -618,7 +684,7 @@ function MonthlyEditModal({ plan, onClose, onSuccess }) {
     try {
       await planApi.changeMonthly(plan._id, newAmount, true);
       toast.success('Monthly installment updated.');
-      onSuccess();
+      if (typeof onSuccess === 'function') onSuccess();
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to update.');
     } finally {
@@ -639,7 +705,7 @@ function MonthlyEditModal({ plan, onClose, onSuccess }) {
           <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">This will change future installment amounts. Existing payment history remains unchanged.</p>
         )}
         <div className="flex justify-end gap-3 mt-4">
-          <button className="btn-secondary" onClick={onClose}>
+          <button className="btn-secondary" onClick={() => typeof onClose === 'function' && onClose()}>
             Cancel
           </button>
           <button className="btn-primary" onClick={submit} disabled={saving}>

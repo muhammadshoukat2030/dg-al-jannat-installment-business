@@ -51,7 +51,9 @@ export default function Withdrawals() {
       .finally(() => setLoading(false));
   }
 
-  useEffect(refresh, [page, investorFilter, dateFilter]);
+  useEffect(() => {
+    refresh();
+  }, [page, investorFilter, dateFilter]);
 
   // Search is client-side over the already-fetched page (small, paginated dataset) —
   // matching investor name, reference, or notes. Server-side filters (investor,

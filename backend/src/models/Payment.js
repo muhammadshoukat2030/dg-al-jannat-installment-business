@@ -26,5 +26,8 @@ const paymentSchema = new mongoose.Schema(
 
 paymentSchema.index({ customerId: 1, paymentDate: -1 });
 paymentSchema.index({ investorId: 1, paymentDate: -1 });
+paymentSchema.index({ planId: 1, paymentDate: -1 });
+paymentSchema.index({ paymentDate: -1 });
+paymentSchema.index({ createdAt: 1 });
 
 module.exports = mongoose.model('Payment', paymentSchema);

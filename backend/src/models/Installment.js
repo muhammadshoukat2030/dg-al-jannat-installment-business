@@ -36,5 +36,7 @@ installmentSchema.index({ planId: 1, installmentNumber: 1 }, { unique: true });
 installmentSchema.index({ customerId: 1 });
 installmentSchema.index({ investorId: 1 });
 installmentSchema.index({ status: 1, dueDate: 1 });
+installmentSchema.index({ dueDate: 1 });
+installmentSchema.index({ updatedAt: 1 });
 
 module.exports = mongoose.model('Installment', installmentSchema);

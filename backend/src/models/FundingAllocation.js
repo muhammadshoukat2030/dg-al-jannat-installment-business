@@ -27,5 +27,7 @@ fundingAllocationSchema.pre('validate', function enforceInvestorRule(next) {
 
 fundingAllocationSchema.index({ planId: 1 });
 fundingAllocationSchema.index({ investorId: 1 });
+fundingAllocationSchema.index({ createdAt: -1 });
+fundingAllocationSchema.index({ updatedAt: 1 });
 
 module.exports = mongoose.model('FundingAllocation', fundingAllocationSchema);

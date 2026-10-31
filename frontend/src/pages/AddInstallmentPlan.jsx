@@ -5,7 +5,7 @@ import { WifiOff } from 'lucide-react';
 import { customerApi, planApi } from '../api/services';
 import { DURATION_OPTIONS } from '../utils/durationOptions';
 import FundingSourceSelector from '../components/investors/FundingSourceSelector';
-import { get } from '../offline/db';
+import { get, getAll } from '../offline/db';
 
 const empty = {
   productName: '',
@@ -33,8 +33,14 @@ export default function AddInstallmentPlan() {
   useEffect(() => {
     // 1. Immediate local-first load from IndexedDB
     get('customers', id)
-      .then((cached) => {
-        if (cached) setCustomer(cached);
+      .then(async (cached) => {
+        if (cached) {
+          setCustomer(cached);
+        } else {
+          const all = await getAll('customers');
+          const found = all.find((c) => String(c._id) === String(id) || String(c.customerId) === String(id));
+          if (found) setCustomer(found);
+        }
       })
       .catch(() => {});
 

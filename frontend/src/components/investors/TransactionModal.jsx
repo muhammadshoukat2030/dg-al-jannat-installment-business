@@ -106,7 +106,7 @@ export default function TransactionModal({ investor, capital, profit, defaultTyp
             ? 'Capital added offline. Will sync automatically.'
             : 'Capital return recorded offline. Will sync automatically.'
         );
-        onSuccess();
+        if (typeof onSuccess === 'function') onSuccess();
         return;
       }
 
@@ -133,7 +133,7 @@ export default function TransactionModal({ investor, capital, profit, defaultTyp
           transactionType === 'INVESTMENT_IN' ? 'Capital added successfully.' : 'Capital return recorded.'
         );
       }
-      onSuccess();
+      if (typeof onSuccess === 'function') onSuccess();
     } catch (err) {
       toast.error(err.response?.data?.message || 'Transaction failed.');
     } finally {
@@ -266,7 +266,7 @@ export default function TransactionModal({ investor, capital, profit, defaultTyp
           </div>
 
           <div className="flex justify-end gap-3 pt-2">
-            <button type="button" className="btn-secondary" onClick={onClose} disabled={saving}>
+            <button type="button" className="btn-secondary" onClick={() => typeof onClose === 'function' && onClose()} disabled={saving}>
               Cancel
             </button>
             <button

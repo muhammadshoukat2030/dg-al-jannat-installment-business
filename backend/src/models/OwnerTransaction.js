@@ -31,5 +31,7 @@ const ownerTransactionSchema = new mongoose.Schema(
 
 ownerTransactionSchema.index({ transactionType: 1, transactionDate: -1 });
 ownerTransactionSchema.index({ investorId: 1 });
+ownerTransactionSchema.index({ transactionDate: -1, createdAt: -1 });
+ownerTransactionSchema.index({ createdAt: 1 });
 
 module.exports = mongoose.model('OwnerTransaction', ownerTransactionSchema);
