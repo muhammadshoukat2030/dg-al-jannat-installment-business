@@ -11,6 +11,7 @@ const investorSchema = new mongoose.Schema(
     address: { type: String, trim: true, default: '' },
     notes: { type: String, trim: true, default: '' },
     status: { type: String, enum: ['ACTIVE', 'INACTIVE'], default: 'ACTIVE' },
+    operationId: { type: String, sparse: true, unique: true },
     isArchived: { type: Boolean, default: false },
     isDeleted: { type: Boolean, default: false },
   },

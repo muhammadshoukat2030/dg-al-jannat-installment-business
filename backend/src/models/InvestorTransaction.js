@@ -20,6 +20,7 @@ const investorTransactionSchema = new mongoose.Schema(
       required: true,
     },
     amount: { type: Number, required: true, min: 0.01 },
+    operationId: { type: String, sparse: true, unique: true },
     transactionDate: { type: Date, required: true, default: Date.now },
     notes: { type: String, trim: true, default: '' },
   },
