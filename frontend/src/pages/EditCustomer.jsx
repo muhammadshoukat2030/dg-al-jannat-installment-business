@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { WifiOff } from 'lucide-react';
 import { customerApi } from '../api/services';
-import { get, put, enqueueOperation } from '../offline/db';
+import { get, getAll, put, enqueueOperation } from '../offline/db';
 import { refreshPendingCount } from '../offline/syncManager';
 
 export default function EditCustomer() {
@@ -15,8 +15,14 @@ export default function EditCustomer() {
 
   useEffect(() => {
     // 1. Read customer from IndexedDB immediately
-    get('customers', id).then((cached) => {
-      if (cached) setCustomer(cached);
+    get('customers', id).then(async (cached) => {
+      if (cached) {
+        setCustomer(cached);
+      } else {
+        const all = await getAll('customers');
+        const found = all.find((c) => String(c._id) === String(id) || String(c.customerId) === String(id));
+        if (found) setCustomer(found);
+      }
     });
 
     // 2. If online, fetch fresh server copy in background

@@ -21,5 +21,9 @@ const customerSchema = new mongoose.Schema(
 
 customerSchema.index({ name: 'text', contactNumber: 'text', cnic: 'text', customerId: 'text' });
 customerSchema.index({ isDeleted: 1, isArchived: 1 });
+customerSchema.index({ isDeleted: 1, createdAt: -1 });
+customerSchema.index({ updatedAt: 1 });
+customerSchema.index({ contactNumber: 1 });
+customerSchema.index({ cnic: 1 });
 
 module.exports = mongoose.model('Customer', customerSchema);

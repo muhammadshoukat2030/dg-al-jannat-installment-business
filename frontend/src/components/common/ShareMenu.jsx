@@ -31,11 +31,14 @@ export default function ShareMenu({ getBlob, documentLabel, customerPhone, custo
   }, []);
 
   async function withBlob(action) {
+    if (typeof getBlob !== 'function') return;
     setBusy(true);
     try {
       const { blob, filename } = await getBlob();
       const file = new File([blob], filename || `${documentLabel}.pdf`, { type: 'application/pdf' });
-      await action(file, blob, filename);
+      if (typeof action === 'function') {
+        await action(file, blob, filename);
+      }
     } catch (err) {
       toast.error(`Failed to prepare ${documentLabel}.`);
     } finally {

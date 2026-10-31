@@ -7,6 +7,7 @@ const InvestorTransaction = require('../models/InvestorTransaction');
 const OwnerTransaction = require('../models/OwnerTransaction');
 const Withdrawal = require('../models/Withdrawal');
 const BusinessSetting = require('../models/BusinessSetting');
+const FundingAllocation = require('../models/FundingAllocation');
 const asyncHandler = require('../middleware/asyncHandler');
 const { recordPayment } = require('../services/installmentService');
 const { generateCustomerId, generateInvestorId } = require('../utils/idGenerator');
@@ -289,6 +290,25 @@ const bootstrapSync = asyncHandler(async (req, res) => {
     });
   }
 
+  if (module === 'fundingAllocations') {
+    const [allocations, total] = await Promise.all([
+      FundingAllocation.find({})
+        .populate('investorId', 'name investorId')
+        .sort({ createdAt: -1 })
+        .skip(numOffset)
+        .limit(numLimit),
+      FundingAllocation.countDocuments({}),
+    ]);
+    return res.json({
+      success: true,
+      serverTime,
+      module: 'fundingAllocations',
+      total,
+      hasMore: numOffset + allocations.length < total,
+      data: allocations,
+    });
+  }
+
   // Default bootstrap: Comprehensive business records for complete offline enablement
   const [
     customers,
@@ -299,6 +319,7 @@ const bootstrapSync = asyncHandler(async (req, res) => {
     investorTransactions,
     withdrawals,
     ownerTransactions,
+    fundingAllocations,
     settings,
     ownerProfit,
     ownerCapital,
@@ -334,6 +355,10 @@ const bootstrapSync = asyncHandler(async (req, res) => {
     OwnerTransaction.find({})
       .sort({ transactionDate: -1, createdAt: -1 })
       .limit(100),
+    FundingAllocation.find({})
+      .populate('investorId', 'name investorId')
+      .sort({ createdAt: -1 })
+      .limit(200),
     BusinessSetting.findOne().catch(() => null),
     accountingService.getOwnerProfitSummary().catch(() => null),
     accountingService.getOwnerCapitalSummary().catch(() => null),
@@ -350,6 +375,7 @@ const bootstrapSync = asyncHandler(async (req, res) => {
     totalInvestorTransactions,
     totalWithdrawals,
     totalOwnerTransactions,
+    totalFundingAllocations,
   ] = await Promise.all([
     Customer.countDocuments({ isDeleted: { $ne: true } }),
     InstallmentPlan.countDocuments({ isDeleted: { $ne: true } }),
@@ -359,6 +385,7 @@ const bootstrapSync = asyncHandler(async (req, res) => {
     InvestorTransaction.countDocuments({}),
     Withdrawal.countDocuments({}),
     OwnerTransaction.countDocuments({}),
+    FundingAllocation.countDocuments({}),
   ]);
 
   const hasMore =
@@ -369,7 +396,8 @@ const bootstrapSync = asyncHandler(async (req, res) => {
     investors.length < totalInvestors ||
     investorTransactions.length < totalInvestorTransactions ||
     withdrawals.length < totalWithdrawals ||
-    ownerTransactions.length < totalOwnerTransactions;
+    ownerTransactions.length < totalOwnerTransactions ||
+    fundingAllocations.length < totalFundingAllocations;
 
   const [investorSummaries, reports] = await Promise.all([
     computeInvestorSummaries(investors),
@@ -389,6 +417,7 @@ const bootstrapSync = asyncHandler(async (req, res) => {
       investorTransactions: totalInvestorTransactions,
       withdrawals: totalWithdrawals,
       ownerTransactions: totalOwnerTransactions,
+      fundingAllocations: totalFundingAllocations,
     },
     data: {
       customers,
@@ -399,6 +428,7 @@ const bootstrapSync = asyncHandler(async (req, res) => {
       investorTransactions,
       withdrawals,
       ownerTransactions,
+      fundingAllocations,
       settings: settings || {},
       ownerData: {
         profit: ownerProfit,
@@ -435,6 +465,7 @@ const deltaSync = asyncHandler(async (req, res) => {
     investorTransactions,
     withdrawals,
     ownerTransactions,
+    fundingAllocations,
     settings,
     ownerProfit,
     ownerCapital,
@@ -449,6 +480,7 @@ const deltaSync = asyncHandler(async (req, res) => {
     InvestorTransaction.find({ createdAt: { $gt: sinceDate } }),
     Withdrawal.find({ createdAt: { $gt: sinceDate } }),
     OwnerTransaction.find({ createdAt: { $gt: sinceDate } }),
+    FundingAllocation.find({ updatedAt: { $gt: sinceDate } }).populate('investorId', 'name investorId'),
     BusinessSetting.findOne({ updatedAt: { $gt: sinceDate } }).catch(() => null),
     accountingService.getOwnerProfitSummary().catch(() => null),
     accountingService.getOwnerCapitalSummary().catch(() => null),
@@ -473,6 +505,7 @@ const deltaSync = asyncHandler(async (req, res) => {
       investorTransactions,
       withdrawals,
       ownerTransactions,
+      fundingAllocations,
       settings,
       ownerData: {
         profit: ownerProfit,
@@ -497,6 +530,36 @@ const pushSync = asyncHandler(async (req, res) => {
   }
 
   const results = [];
+  const idMap = new Map();
+
+  // Helper to resolve client temporary IDs to authoritative MongoDB ObjectIds
+  async function resolveInvestorId(id) {
+    if (!id) return null;
+    const str = String(id).trim();
+    if (idMap.has(str)) return idMap.get(str);
+    if (/^[0-9a-fA-F]{24}$/.test(str)) return str;
+    const raw = str.replace(/^(temp_|local_)/, '');
+    const inv = await Investor.findOne({ $or: [{ operationId: str }, { operationId: raw }, { investorId: str }] });
+    if (inv) {
+      idMap.set(str, String(inv._id));
+      return String(inv._id);
+    }
+    return str;
+  }
+
+  async function resolveCustomerId(id) {
+    if (!id) return null;
+    const str = String(id).trim();
+    if (idMap.has(str)) return idMap.get(str);
+    if (/^[0-9a-fA-F]{24}$/.test(str)) return str;
+    const raw = str.replace(/^(temp_|local_)/, '');
+    const cust = await Customer.findOne({ $or: [{ operationId: str }, { operationId: raw }, { customerId: str }] });
+    if (cust) {
+      idMap.set(str, String(cust._id));
+      return String(cust._id);
+    }
+    return str;
+  }
 
   for (const op of operations) {
     const { operationId, type, payload } = op;
@@ -534,6 +597,9 @@ const pushSync = asyncHandler(async (req, res) => {
       } else if (type === 'CREATE_CUSTOMER') {
         const existing = await Customer.findOne({ operationId });
         if (existing) {
+          idMap.set(operationId, String(existing._id));
+          if (op.localId) idMap.set(op.localId, String(existing._id));
+          if (op.tempId) idMap.set(op.tempId, String(existing._id));
           results.push({
             operationId,
             type,
@@ -548,6 +614,9 @@ const pushSync = asyncHandler(async (req, res) => {
             customerId,
             operationId,
           });
+          idMap.set(operationId, String(customer._id));
+          if (op.localId) idMap.set(op.localId, String(customer._id));
+          if (op.tempId) idMap.set(op.tempId, String(customer._id));
           results.push({
             operationId,
             type,
@@ -594,6 +663,26 @@ const pushSync = asyncHandler(async (req, res) => {
           status: 'CONFIRMED',
           serverRecord: customer,
         });
+      } else if (type === 'DELETE_CUSTOMER' || type === 'ARCHIVE_CUSTOMER') {
+        const targetCustomerId = await resolveCustomerId(payload._id || payload.id);
+        const customer = await Customer.findById(targetCustomerId);
+        if (!customer) {
+          results.push({ operationId, type, status: 'CONFIRMED', idempotentReplay: true });
+        } else {
+          if (type === 'ARCHIVE_CUSTOMER') {
+            customer.isArchived = true;
+            await customer.save();
+          } else {
+            const activePlans = await InstallmentPlan.countDocuments({ customerId: customer._id, isDeleted: { $ne: true } });
+            if (activePlans > 0) {
+              results.push({ operationId, type, status: 'ERROR', error: 'Cannot delete customer with existing plans.' });
+              continue;
+            }
+            customer.isDeleted = true;
+            await customer.save();
+          }
+          results.push({ operationId, type, status: 'CONFIRMED', serverRecord: customer });
+        }
       } else if (type === 'UPDATE_SETTINGS') {
         let settings = await BusinessSetting.findOne();
         if (!settings) settings = new BusinessSetting();
@@ -610,6 +699,9 @@ const pushSync = asyncHandler(async (req, res) => {
       } else if (type === 'CREATE_INVESTOR') {
         const existing = await Investor.findOne({ operationId });
         if (existing) {
+          idMap.set(operationId, String(existing._id));
+          if (op.localId) idMap.set(op.localId, String(existing._id));
+          if (op.tempId) idMap.set(op.tempId, String(existing._id));
           results.push({
             operationId,
             type,
@@ -624,6 +716,9 @@ const pushSync = asyncHandler(async (req, res) => {
             investorId,
             operationId,
           });
+          idMap.set(operationId, String(investor._id));
+          if (op.localId) idMap.set(op.localId, String(investor._id));
+          if (op.tempId) idMap.set(op.tempId, String(investor._id));
           results.push({
             operationId,
             type,
@@ -663,8 +758,9 @@ const pushSync = asyncHandler(async (req, res) => {
           });
         } else {
           const { investorId, transactionType, amount, transactionDate, notes } = payload;
+          const targetInvestorId = await resolveInvestorId(investorId);
           const tx = await InvestorTransaction.create({
-            investorId,
+            investorId: targetInvestorId,
             transactionType,
             amount: Number(amount),
             transactionDate: transactionDate || new Date(),
@@ -690,9 +786,10 @@ const pushSync = asyncHandler(async (req, res) => {
           });
         } else {
           const { investorId, totalAmount, notes, reference, withdrawalDate, withdrawalType } = payload;
+          const targetInvestorId = await resolveInvestorId(investorId);
           const half = Number(totalAmount) / 2;
           const w = await Withdrawal.create({
-            investorId,
+            investorId: targetInvestorId,
             totalAmount: Number(totalAmount),
             ownerAmount: half,
             investorAmount: half,

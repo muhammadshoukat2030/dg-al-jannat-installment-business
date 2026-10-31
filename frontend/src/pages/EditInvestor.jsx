@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { investorApi } from '../api/services';
-import { get, put, enqueueOperation } from '../offline/db';
+import { get, getAll, put, enqueueOperation } from '../offline/db';
 import { refreshPendingCount } from '../offline/syncManager';
 
 export default function EditInvestor() {
@@ -13,8 +13,14 @@ export default function EditInvestor() {
 
   useEffect(() => {
     // 1. Local-first load from IndexedDB
-    get('investors', id).then((local) => {
-      if (local) setInvestor(local);
+    get('investors', id).then(async (local) => {
+      if (local) {
+        setInvestor(local);
+      } else {
+        const all = await getAll('investors');
+        const found = all.find((inv) => String(inv._id) === String(id) || String(inv.investorId) === String(id));
+        if (found) setInvestor(found);
+      }
     }).catch(() => {});
 
     // 2. Server revalidation

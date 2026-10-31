@@ -105,7 +105,9 @@ export default function MultiFundingSelector({ purchaseCost, onChange }) {
         investorId: r.sourceType === 'INVESTOR' ? r.investorId : null,
         amount: toPkr(toPaisa(r.amountStr)),
       }));
-    onChange({ allocations, isValid });
+    if (typeof onChange === 'function') {
+      onChange({ allocations, isValid });
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selections, isValid]);
 

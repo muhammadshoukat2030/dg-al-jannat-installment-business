@@ -20,4 +20,6 @@ const businessSettingSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+businessSettingSchema.index({ updatedAt: 1 });
+
 module.exports = mongoose.model('BusinessSetting', businessSettingSchema);

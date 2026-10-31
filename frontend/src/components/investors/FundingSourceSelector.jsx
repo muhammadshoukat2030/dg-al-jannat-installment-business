@@ -48,6 +48,7 @@ export default function FundingSourceSelector({ value, onChange, suggestedAmount
   }, [search, value.fundingSource]);
 
   function selectFundingSource(source) {
+    if (typeof onChange !== 'function') return;
     if (source === 'BUSINESS') {
       setSelectedInvestor(null);
       onChange({ fundingSource: 'BUSINESS', investorId: null, capitalDeployed: 0 });
@@ -60,11 +61,13 @@ export default function FundingSourceSelector({ value, onChange, suggestedAmount
     setSelectedInvestor(inv);
     setSearch('');
     setInvestors([]);
-    onChange({
-      fundingSource: 'INVESTOR',
-      investorId: inv._id,
-      capitalDeployed: value.capitalDeployed || suggestedAmount || '',
-    });
+    if (typeof onChange === 'function') {
+      onChange({
+        fundingSource: 'INVESTOR',
+        investorId: inv._id,
+        capitalDeployed: value.capitalDeployed || suggestedAmount || '',
+      });
+    }
   }
 
   const deployAmount = Number(value.capitalDeployed) || 0;
@@ -133,7 +136,9 @@ export default function FundingSourceSelector({ value, onChange, suggestedAmount
                   className="text-xs text-primary-600 hover:underline"
                   onClick={() => {
                     setSelectedInvestor(null);
-                    onChange({ fundingSource: 'INVESTOR', investorId: null, capitalDeployed: value.capitalDeployed });
+                    if (typeof onChange === 'function') {
+                      onChange({ fundingSource: 'INVESTOR', investorId: null, capitalDeployed: value.capitalDeployed });
+                    }
                   }}
                 >
                   Change
@@ -152,7 +157,11 @@ export default function FundingSourceSelector({ value, onChange, suggestedAmount
                   type="number"
                   className="input"
                   value={value.capitalDeployed}
-                  onChange={(e) => onChange({ ...value, capitalDeployed: e.target.value })}
+                  onChange={(e) => {
+                    if (typeof onChange === 'function') {
+                      onChange({ ...value, capitalDeployed: e.target.value });
+                    }
+                  }}
                 />
                 {exceedsAvailable && (
                   <p className="text-xs text-red-600 mt-1">

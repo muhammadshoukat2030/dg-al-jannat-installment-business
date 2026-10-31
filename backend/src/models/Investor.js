@@ -21,5 +21,7 @@ const investorSchema = new mongoose.Schema(
 investorSchema.index({ name: 'text', phone: 'text', cnic: 'text', investorId: 'text' });
 investorSchema.index({ status: 1 });
 investorSchema.index({ isDeleted: 1 });
+investorSchema.index({ isDeleted: 1, createdAt: -1 });
+investorSchema.index({ updatedAt: 1 });
 
 module.exports = mongoose.model('Investor', investorSchema);

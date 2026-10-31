@@ -55,7 +55,9 @@ export default function OwnerFundedContracts() {
   }
 
   useEffect(() => { setPage(1); }, [search, status]);
-  useEffect(load, [search, status, page]);
+  useEffect(() => {
+    load();
+  }, [search, status, page]);
 
   async function handleExport(type) {
     setExporting(true);

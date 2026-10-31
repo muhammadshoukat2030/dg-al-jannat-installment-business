@@ -53,7 +53,9 @@ export default function OwnerFundedCustomers() {
   }
 
   useEffect(() => { setPage(1); }, [search]);
-  useEffect(load, [search, page]);
+  useEffect(() => {
+    load();
+  }, [search, page]);
 
   async function handleExport(type) {
     setExporting(true);

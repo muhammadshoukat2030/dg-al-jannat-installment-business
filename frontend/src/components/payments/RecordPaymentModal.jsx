@@ -42,7 +42,7 @@ export default function RecordPaymentModal({ installment, onClose, onSuccess }) 
         }
 
         toast.success('Payment recorded.');
-        onSuccess();
+        if (typeof onSuccess === 'function') onSuccess();
         return;
       } catch (err) {
         // If not a network error (e.g. 400 Bad Request validation from server), throw error directly
@@ -100,7 +100,7 @@ export default function RecordPaymentModal({ installment, onClose, onSuccess }) 
 
       await refreshPendingCount();
       toast.success('Offline mode: Payment saved locally — will sync automatically when online.');
-      onSuccess();
+      if (typeof onSuccess === 'function') onSuccess();
     } catch (offlineErr) {
       toast.error('Failed to save payment locally: ' + offlineErr.message);
     } finally {
@@ -113,7 +113,7 @@ export default function RecordPaymentModal({ installment, onClose, onSuccess }) 
     try {
       await installmentApi.markMissed(installment._id, { confirm: true, reason: notes, recordedDate: paymentDate });
       toast.success('Installment marked as missed.');
-      onSuccess();
+      if (typeof onSuccess === 'function') onSuccess();
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to mark as missed.');
     } finally {
@@ -123,7 +123,7 @@ export default function RecordPaymentModal({ installment, onClose, onSuccess }) 
 
   if (confirmingZero) {
     return (
-      <Modal onClose={onClose} title="Confirm Missed Installment">
+      <Modal onClose={() => typeof onClose === 'function' && onClose()} title="Confirm Missed Installment">
         <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">
           No payment has been received for this installment. Mark this installment as MISSED?
         </p>
@@ -196,7 +196,7 @@ function Modal({ title, children, onClose }) {
       <div className="card w-full max-w-md max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-semibold">{title}</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+          <button onClick={() => typeof onClose === 'function' && onClose()} className="text-gray-400 hover:text-gray-600">
             ✕
           </button>
         </div>

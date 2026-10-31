@@ -24,10 +24,12 @@ export default function DateFilterBar({ onChange, className = '' }) {
 
   function applyPreset(value) {
     setPreset(value);
-    if (value !== 'custom') {
-      onChange({ preset: value });
-    } else if (from && to) {
-      onChange({ preset: 'custom', from, to });
+    if (typeof onChange === 'function') {
+      if (value !== 'custom') {
+        onChange({ preset: value });
+      } else if (from && to) {
+        onChange({ preset: 'custom', from, to });
+      }
     }
   }
 
@@ -36,7 +38,9 @@ export default function DateFilterBar({ onChange, className = '' }) {
     setTo(newTo);
     if (newFrom && newTo) {
       if (newFrom > newTo) return; // invalid range — wait for a valid one before firing
-      onChange({ preset: 'custom', from: newFrom, to: newTo });
+      if (typeof onChange === 'function') {
+        onChange({ preset: 'custom', from: newFrom, to: newTo });
+      }
     }
   }
 
@@ -44,7 +48,9 @@ export default function DateFilterBar({ onChange, className = '' }) {
     setPreset('all');
     setFrom('');
     setTo('');
-    onChange({ preset: 'all' });
+    if (typeof onChange === 'function') {
+      onChange({ preset: 'all' });
+    }
   }
 
   return (

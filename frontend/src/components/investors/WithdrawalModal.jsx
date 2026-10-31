@@ -76,13 +76,13 @@ export default function WithdrawalModal({ investorId: fixedInvestorId, onClose, 
         });
         await refreshPendingCount();
         toast.success('Withdrawal saved offline. Will sync automatically when online.');
-        onSuccess();
+        if (typeof onSuccess === 'function') onSuccess();
         return;
       }
 
       await withdrawalApi.create({ investorId, totalAmount: total, withdrawalDate, reference, notes });
       toast.success('Profit withdrawn and transferred to available capital.');
-      onSuccess();
+      if (typeof onSuccess === 'function') onSuccess();
     } catch (err) {
       // Backend is authoritative — its rejection message (e.g. insufficient remaining
       // profit) is shown verbatim rather than re-deriving our own error text.
@@ -172,7 +172,7 @@ export default function WithdrawalModal({ investorId: fixedInvestorId, onClose, 
         </div>
 
         <div className="flex justify-end gap-3 flex-wrap mt-5">
-          <button className="btn-secondary" onClick={onClose} disabled={saving}>
+          <button className="btn-secondary" onClick={() => typeof onClose === 'function' && onClose()} disabled={saving}>
             Cancel
           </button>
           <button className="btn-primary" onClick={submit} disabled={saving}>

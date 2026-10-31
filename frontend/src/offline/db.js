@@ -5,7 +5,7 @@
  */
 
 const DB_NAME = 'ims_offline_db';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 let dbPromise = null;
 
@@ -107,6 +107,23 @@ export function openDB() {
       // 12. Conflicts store
       if (!db.objectStoreNames.contains('conflicts')) {
         db.createObjectStore('conflicts', { keyPath: 'operationId' });
+      }
+
+      // 13. Funding Allocations store
+      if (!db.objectStoreNames.contains('fundingAllocations')) {
+        const store = db.createObjectStore('fundingAllocations', { keyPath: '_id' });
+        store.createIndex('planId', 'planId', { unique: false });
+        store.createIndex('investorId', 'investorId', { unique: false });
+        store.createIndex('sourceType', 'sourceType', { unique: false });
+      }
+
+      // 14. Missed Installment Events store
+      if (!db.objectStoreNames.contains('missedInstallmentEvents')) {
+        const store = db.createObjectStore('missedInstallmentEvents', { keyPath: '_id' });
+        store.createIndex('planId', 'planId', { unique: false });
+        store.createIndex('customerId', 'customerId', { unique: false });
+        store.createIndex('installmentId', 'installmentId', { unique: false });
+        store.createIndex('recordedDate', 'recordedDate', { unique: false });
       }
     };
 
@@ -334,7 +351,7 @@ export async function queryCustomersOffline({ search, status = 'active', page = 
   };
 }
 
-export async function queryPaymentsOffline({ page = 1, limit = 20, customerId, planId } = {}) {
+export async function queryPaymentsOffline({ page = 1, limit = 20, customerId, planId, preset, from, to } = {}) {
   const all = await getAll('payments');
   let filtered = all;
 
@@ -343,6 +360,51 @@ export async function queryPaymentsOffline({ page = 1, limit = 20, customerId, p
   }
   if (planId) {
     filtered = filtered.filter((p) => p.planId === planId || p.planId?._id === planId);
+  }
+
+  if (preset && preset !== 'all') {
+    const now = new Date();
+    const startOfDay = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
+    const endOfDay = (d) => { const x = new Date(d); x.setHours(23, 59, 59, 999); return x; };
+    const today = startOfDay(now);
+
+    filtered = filtered.filter((p) => {
+      if (!p.paymentDate) return false;
+      const d = new Date(p.paymentDate);
+      switch (preset) {
+        case 'today':
+          return d >= today && d <= endOfDay(now);
+        case 'yesterday': {
+          const y = new Date(today); y.setDate(y.getDate() - 1);
+          return d >= y && d <= endOfDay(y);
+        }
+        case 'this_week': {
+          const start = new Date(today); start.setDate(start.getDate() - start.getDay());
+          return d >= start && d <= endOfDay(now);
+        }
+        case 'last_week': {
+          const thisWeekStart = new Date(today); thisWeekStart.setDate(thisWeekStart.getDate() - thisWeekStart.getDay());
+          const lastWeekStart = new Date(thisWeekStart); lastWeekStart.setDate(lastWeekStart.getDate() - 7);
+          const lastWeekEnd = new Date(thisWeekStart); lastWeekEnd.setDate(lastWeekEnd.getDate() - 1);
+          return d >= lastWeekStart && d <= endOfDay(lastWeekEnd);
+        }
+        case 'this_month': {
+          const start = new Date(now.getFullYear(), now.getMonth(), 1);
+          return d >= start && d <= endOfDay(now);
+        }
+        case 'last_month': {
+          const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+          const end = new Date(now.getFullYear(), now.getMonth(), 0);
+          return d >= start && d <= endOfDay(end);
+        }
+        case 'custom': {
+          if (!from || !to) return true;
+          return d >= startOfDay(new Date(from)) && d <= endOfDay(new Date(to));
+        }
+        default:
+          return true;
+      }
+    });
   }
 
   // Sort by paymentDate descending
@@ -486,29 +548,49 @@ export async function setOwnerDataOffline(ownerData) {
 }
 
 export async function getInvestorOffline(id) {
-  const investor = await get('investors', id);
+  let investor = await get('investors', id);
+  if (!investor) {
+    const all = await getAll('investors');
+    investor = all.find((inv) => String(inv._id) === String(id) || String(inv.investorId) === String(id));
+  }
   if (!investor) return null;
 
   const cachedSummaries = (await getMetadata('cachedInvestorSummaries')) || {};
-  const cached = cachedSummaries[id] || cachedSummaries[String(id)];
+  const invIdStr = String(investor._id);
+  const cached = cachedSummaries[id] || cachedSummaries[String(id)] || cachedSummaries[invIdStr];
 
-  const defaultCapital = {
-    capitalHeld: 0,
-    customersFunded: 0,
-    contractsFunded: 0,
-    customerCollections: 0,
-    outstanding: 0,
-    originalCapitalInvested: 0,
+  // Derive metrics locally from IndexedDB tables if cached summary is absent
+  const [allTx, allPlans] = await Promise.all([
+    getAll('investorTransactions'),
+    getAll('installmentPlans'),
+  ]);
+
+  const invTx = (allTx || []).filter((t) => String(t.investorId?._id || t.investorId) === invIdStr);
+  const invPlans = (allPlans || []).filter((p) => !p.isDeleted && String(p.investorId?._id || p.investorId) === invIdStr);
+
+  const invested = invTx.filter((t) => t.transactionType === 'INVESTMENT_IN').reduce((sum, t) => sum + Number(t.amount || 0), 0);
+  const returned = invTx.filter((t) => t.transactionType === 'RETURN_TO_INVESTOR').reduce((sum, t) => sum + Number(t.amount || 0), 0);
+  const held = invested - returned;
+  const deployed = invPlans.reduce((sum, p) => sum + Number(p.capitalDeployed || p.purchaseCost || 0), 0);
+  const available = Math.max(0, held - deployed);
+
+  const derivedCapital = {
+    capitalHeld: held,
+    customersFunded: new Set(invPlans.map((p) => String(p.customerId?._id || p.customerId))).size,
+    contractsFunded: invPlans.length,
+    customerCollections: invPlans.reduce((sum, p) => sum + Number(p.totalPaid || 0) + Number(p.downPayment || 0), 0),
+    outstanding: invPlans.reduce((sum, p) => sum + Number(p.remainingAmount || 0), 0),
+    originalCapitalInvested: invested,
     additionalCapitalAdded: 0,
-    totalCapitalReturned: 0,
-    capitalDeployed: 0,
+    totalCapitalReturned: returned,
+    capitalDeployed: deployed,
     recoveredCapital: 0,
-    capitalStillDeployed: 0,
-    capitalAvailable: 0,
-    totalSale: 0,
-    totalCost: 0,
-    expectedProfit: 0,
-    expectedLoss: 0,
+    capitalStillDeployed: deployed,
+    capitalAvailable: available,
+    totalSale: invPlans.reduce((sum, p) => sum + Number(p.sellingPrice || 0), 0),
+    totalCost: invPlans.reduce((sum, p) => sum + Number(p.purchaseCost || 0), 0),
+    expectedProfit: invPlans.reduce((sum, p) => sum + Number(p.expectedProfit || 0), 0),
+    expectedLoss: invPlans.reduce((sum, p) => sum + Number(p.expectedLoss || 0), 0),
   };
 
   const defaultInstallmentStats = {
@@ -528,7 +610,7 @@ export async function getInvestorOffline(id) {
 
   return {
     investor: cached?.investor || investor,
-    capital: cached?.capital || defaultCapital,
+    capital: cached?.capital || derivedCapital,
     installmentStats: cached?.installmentStats || defaultInstallmentStats,
     profit: cached?.profit || defaultProfit,
   };
@@ -702,4 +784,74 @@ export async function queryInvestorFundedCustomersOffline({ investorId, search, 
     page,
     pages: Math.ceil(total / limit) || 1,
   };
+}
+
+export async function getBootstrapManifest() {
+  return (await getMetadata('bootstrapManifest')) || null;
+}
+
+export async function setBootstrapManifest(manifest) {
+  return setMetadata('bootstrapManifest', manifest);
+}
+
+export async function getStorageDiagnostics() {
+  if (typeof navigator !== 'undefined' && navigator.storage && navigator.storage.estimate) {
+    try {
+      const estimate = await navigator.storage.estimate();
+      const usageMB = Math.round(((estimate.usage || 0) / (1024 * 1024)) * 100) / 100;
+      const quotaMB = Math.round(((estimate.quota || 0) / (1024 * 1024)) * 100) / 100;
+      const percent = estimate.quota ? Math.round(((estimate.usage || 0) / estimate.quota) * 100) : 0;
+      return {
+        usageBytes: estimate.usage || 0,
+        quotaBytes: estimate.quota || 0,
+        usageMB,
+        quotaMB,
+        percent,
+        persisted: typeof navigator.storage.persisted === 'function' ? await navigator.storage.persisted() : true,
+      };
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+export async function queryFundingAllocationsOffline({ planId, investorId } = {}) {
+  const all = await getAll('fundingAllocations');
+  let filtered = all;
+  if (planId) {
+    filtered = filtered.filter((a) => String(a.planId?._id || a.planId) === String(planId));
+  }
+  if (investorId) {
+    filtered = filtered.filter((a) => String(a.investorId?._id || a.investorId) === String(investorId));
+  }
+  return filtered;
+}
+
+export async function queryMissedEventsOffline({ planId, customerId } = {}) {
+  const all = await getAll('missedInstallmentEvents');
+  let filtered = all;
+  if (planId) {
+    filtered = filtered.filter((m) => String(m.planId?._id || m.planId) === String(planId));
+  }
+  if (customerId) {
+    filtered = filtered.filter((m) => String(m.customerId?._id || m.customerId) === String(customerId));
+  }
+  return filtered.sort((a, b) => new Date(b.recordedDate || 0) - new Date(a.recordedDate || 0));
+}
+
+export async function deleteCustomerOffline(customerId) {
+  const customer = await get('customers', customerId);
+  if (customer) {
+    customer.isDeleted = true;
+    await put('customers', customer);
+  }
+}
+
+export async function archiveCustomerOffline(customerId) {
+  const customer = await get('customers', customerId);
+  if (customer) {
+    customer.isArchived = true;
+    await put('customers', customer);
+  }
 }

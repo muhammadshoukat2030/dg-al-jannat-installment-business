@@ -1,5 +1,7 @@
 const asyncHandler = require('../middleware/asyncHandler');
 const OwnerTransaction = require('../models/OwnerTransaction');
+const Withdrawal = require('../models/Withdrawal');
+const Investor = require('../models/Investor');
 const accountingService = require('../services/accountingService');
 const { parseDateFilter } = require('../utils/dateFilter');
 
@@ -93,16 +95,17 @@ const ownerProfitTransaction = asyncHandler(async (req, res) => {
 });
 
 const getWithdrawals = asyncHandler(async (req, res) => {
-  const Withdrawal = require('../models/Withdrawal');
-  const { page = 1, limit = 30, preset, from, to } = req.query;
+  const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+  const limit = Math.max(1, Math.min(100, parseInt(req.query.limit, 10) || 30));
+  const { preset, from, to } = req.query;
   const dateRange = parseDateFilter({ preset, from, to });
   const query = dateRange ? { withdrawalDate: dateRange } : {};
-  const skip = (Number(page) - 1) * Number(limit);
+  const skip = (page - 1) * limit;
   const [withdrawals, total] = await Promise.all([
-    Withdrawal.find(query).populate('investorId', 'name investorId').sort({ withdrawalDate: -1 }).skip(skip).limit(Number(limit)),
+    Withdrawal.find(query).populate('investorId', 'name investorId').sort({ withdrawalDate: -1 }).skip(skip).limit(limit),
     Withdrawal.countDocuments(query),
   ]);
-  res.json({ success: true, data: withdrawals, total, page: Number(page), pages: Math.ceil(total / limit) });
+  res.json({ success: true, data: withdrawals, total, page, pages: Math.ceil(total / limit) || 1 });
 });
 
 module.exports = { getSummary, getTransactions, getProfit, getCapital, addCapitalTransaction, ownerProfitTransaction, getWithdrawals };

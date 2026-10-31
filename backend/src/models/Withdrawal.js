@@ -26,5 +26,8 @@ const withdrawalSchema = new mongoose.Schema(
 );
 
 withdrawalSchema.index({ investorId: 1, withdrawalDate: -1 });
+withdrawalSchema.index({ withdrawalDate: -1 });
+withdrawalSchema.index({ createdAt: -1 });
+withdrawalSchema.index({ createdAt: 1 });
 
 module.exports = mongoose.model('Withdrawal', withdrawalSchema);

@@ -45,6 +45,8 @@ installmentPlanSchema.index({ investorId: 1 });
 installmentPlanSchema.index({ customerId: 1, status: 1 });
 installmentPlanSchema.index({ customerId: 1, investorId: 1 });
 installmentPlanSchema.index({ startDate: -1 });
+installmentPlanSchema.index({ isDeleted: 1, createdAt: -1 });
+installmentPlanSchema.index({ updatedAt: 1 });
 
 installmentPlanSchema.pre('validate', function enforceInvestorRule(next) {
   if (this.fundingSource === 'INVESTOR' && !this.investorId) {

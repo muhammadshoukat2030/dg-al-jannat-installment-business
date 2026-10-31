@@ -960,12 +960,12 @@ function AddTransactionModal({ investorId, onClose, onSuccess }) {
         });
         await refreshPendingCount();
         toast.success('Transaction saved offline. Will sync automatically.');
-        onSuccess();
+        if (typeof onSuccess === 'function') onSuccess();
         return;
       }
       await investorApi.addTransaction(investorId, { transactionType, amount: Number(amount), transactionDate, notes });
       toast.success('Transaction recorded.');
-      onSuccess();
+      if (typeof onSuccess === 'function') onSuccess();
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to record transaction.');
     } finally {
@@ -1000,7 +1000,7 @@ function AddTransactionModal({ investorId, onClose, onSuccess }) {
           </div>
         </div>
         <div className="flex justify-end gap-3 flex-wrap mt-5">
-          <button className="btn-secondary" onClick={onClose} disabled={saving}>
+          <button className="btn-secondary" onClick={() => typeof onClose === 'function' && onClose()} disabled={saving}>
             Cancel
           </button>
           <button className="btn-primary" onClick={submit} disabled={saving}>

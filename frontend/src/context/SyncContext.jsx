@@ -1,13 +1,20 @@
 import { createContext, useContext, useEffect, useState } from 'react';
-import { subscribeSyncState, triggerSync, initSyncManager } from '../offline/syncManager';
+import { subscribeSyncState, triggerSync, initSyncManager, retryFailedOperations } from '../offline/syncManager';
 
 const SyncContext = createContext({
   isOnline: true,
   isSyncing: false,
   pendingCount: 0,
+  failedCount: 0,
+  conflictCount: 0,
+  bootstrapStatus: 'PENDING',
+  bootstrapPercent: 0,
+  currentStep: '',
   lastSyncTime: null,
   lastError: null,
+  storageDiagnostics: null,
   triggerSync: async () => {},
+  retryFailedOperations: async () => {},
 });
 
 export function SyncProvider({ children }) {
@@ -15,8 +22,14 @@ export function SyncProvider({ children }) {
     isOnline: typeof navigator !== 'undefined' ? navigator.onLine : true,
     isSyncing: false,
     pendingCount: 0,
+    failedCount: 0,
+    conflictCount: 0,
+    bootstrapStatus: 'PENDING',
+    bootstrapPercent: 0,
+    currentStep: '',
     lastSyncTime: null,
     lastError: null,
+    storageDiagnostics: null,
   });
 
   useEffect(() => {
@@ -28,7 +41,7 @@ export function SyncProvider({ children }) {
   }, []);
 
   return (
-    <SyncContext.Provider value={{ ...syncState, triggerSync }}>
+    <SyncContext.Provider value={{ ...syncState, triggerSync, retryFailedOperations }}>
       {children}
     </SyncContext.Provider>
   );
