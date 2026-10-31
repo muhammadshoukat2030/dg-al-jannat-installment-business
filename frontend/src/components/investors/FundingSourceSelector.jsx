@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { investorApi } from '../../api/services';
 import { formatCurrency } from '../../utils/format';
+import { queryInvestorsOffline } from '../../offline/db';
 
 /**
  * Funding source picker used when creating an installment contract.
@@ -23,10 +24,25 @@ export default function FundingSourceSelector({ value, onChange, suggestedAmount
     if (value.fundingSource !== 'INVESTOR') return;
     const timer = setTimeout(() => {
       setLoadingInvestors(true);
-      investorApi
-        .list({ search, status: 'active', limit: 10 })
-        .then((res) => setInvestors(res.data.data))
-        .finally(() => setLoadingInvestors(false));
+      // 1. Local-first read from IndexedDB
+      queryInvestorsOffline({ search, status: 'active', limit: 10 })
+        .then((local) => {
+          if (local && local.data) setInvestors(local.data);
+        })
+        .catch(() => {});
+
+      // 2. Server revalidation when online
+      if (navigator.onLine) {
+        investorApi
+          .list({ search, status: 'active', limit: 10 })
+          .then((res) => {
+            if (res.data?.data) setInvestors(res.data.data);
+          })
+          .catch(() => {})
+          .finally(() => setLoadingInvestors(false));
+      } else {
+        setLoadingInvestors(false);
+      }
     }, 250);
     return () => clearTimeout(timer);
   }, [search, value.fundingSource]);

@@ -38,9 +38,12 @@ async function computeInvestorSummaries(investors) {
   return summaries;
 }
 
-async function computeCommonReports(plans) {
+async function computeCommonReports(plans, installments, payments) {
   try {
     const list = Array.isArray(plans) ? plans : [];
+    const instList = Array.isArray(installments) ? installments : [];
+    const payList = Array.isArray(payments) ? payments : [];
+
     const profitData = list.map((p) => ({
       customer: p.customerId,
       product: p.productName,
@@ -58,10 +61,68 @@ async function computeCommonReports(plans) {
       .filter((p) => (p.remainingAmount || 0) > 0)
       .sort((a, b) => (b.remainingAmount || 0) - (a.remainingAmount || 0));
 
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const overdueData = instList
+      .filter((i) => i.status === 'OVERDUE' || (new Date(i.dueDate) < today && (i.remainingAmount > 0 || (i.amountDue - (i.paidAmount || 0)) > 0)))
+      .map((i) => {
+        const d = new Date(i.dueDate);
+        d.setHours(0, 0, 0, 0);
+        return {
+          customer: i.customerId,
+          contract: i.planId,
+          installmentNumber: i.installmentNumber,
+          dueDate: i.dueDate,
+          daysOverdue: Math.max(0, Math.floor((today - d) / (1000 * 60 * 60 * 24))),
+          amountDue: i.amountDue,
+          paid: i.paidAmount || 0,
+          remaining: i.remainingAmount !== undefined ? i.remainingAmount : (i.amountDue - (i.paidAmount || 0)),
+        };
+      });
+
+    const missedData = instList
+      .filter((i) => i.status === 'MISSED')
+      .map((i) => ({
+        customerId: i.customerId,
+        installmentId: i,
+        recordedDate: i.updatedAt || i.dueDate,
+      }));
+
+    const dailyMap = new Map();
+    payList.forEach((p) => {
+      if (!p.paymentDate) return;
+      const key = new Date(p.paymentDate).toISOString().slice(0, 10);
+      if (!dailyMap.has(key)) {
+        dailyMap.set(key, { _id: key, total: 0, count: 0 });
+      }
+      const entry = dailyMap.get(key);
+      entry.total += Number(p.amount || 0);
+      entry.count += 1;
+    });
+    const dailyData = Array.from(dailyMap.values()).sort((a, b) => b._id.localeCompare(a._id));
+
+    const monthlyMap = new Map();
+    payList.forEach((p) => {
+      if (!p.paymentDate) return;
+      const key = new Date(p.paymentDate).toISOString().slice(0, 7);
+      if (!monthlyMap.has(key)) {
+        monthlyMap.set(key, { _id: key, total: 0, count: 0 });
+      }
+      const entry = monthlyMap.get(key);
+      entry.total += Number(p.amount || 0);
+      entry.count += 1;
+    });
+    const monthlyData = Array.from(monthlyMap.values()).sort((a, b) => b._id.localeCompare(a._id));
+
     return {
       profit: profitData,
       loss: lossData,
       outstanding: outstandingData,
+      overdue: overdueData,
+      missed: missedData,
+      daily: dailyData,
+      monthly: monthlyData,
     };
   } catch (e) {
     return {};
@@ -95,6 +156,136 @@ const bootstrapSync = asyncHandler(async (req, res) => {
       total,
       hasMore: numOffset + customers.length < total,
       data: customers,
+    });
+  }
+
+  if (module === 'plans') {
+    const [plans, total] = await Promise.all([
+      InstallmentPlan.find({ isDeleted: { $ne: true } })
+        .populate('investorId', 'name investorId')
+        .sort({ createdAt: -1 })
+        .skip(numOffset)
+        .limit(numLimit),
+      InstallmentPlan.countDocuments({ isDeleted: { $ne: true } }),
+    ]);
+    return res.json({
+      success: true,
+      serverTime,
+      module: 'plans',
+      total,
+      hasMore: numOffset + plans.length < total,
+      data: plans,
+    });
+  }
+
+  if (module === 'installments') {
+    const [installments, total] = await Promise.all([
+      Installment.find({})
+        .sort({ dueDate: 1 })
+        .skip(numOffset)
+        .limit(numLimit),
+      Installment.countDocuments({}),
+    ]);
+    return res.json({
+      success: true,
+      serverTime,
+      module: 'installments',
+      total,
+      hasMore: numOffset + installments.length < total,
+      data: installments,
+    });
+  }
+
+  if (module === 'payments') {
+    const [payments, total] = await Promise.all([
+      Payment.find({})
+        .populate('customerId', 'name contactNumber')
+        .populate('installmentId', 'installmentNumber')
+        .sort({ paymentDate: -1 })
+        .skip(numOffset)
+        .limit(numLimit),
+      Payment.countDocuments({}),
+    ]);
+    return res.json({
+      success: true,
+      serverTime,
+      module: 'payments',
+      total,
+      hasMore: numOffset + payments.length < total,
+      data: payments,
+    });
+  }
+
+  if (module === 'investors') {
+    const [investors, total] = await Promise.all([
+      Investor.find({ isDeleted: { $ne: true } })
+        .sort({ createdAt: -1 })
+        .skip(numOffset)
+        .limit(numLimit),
+      Investor.countDocuments({ isDeleted: { $ne: true } }),
+    ]);
+    return res.json({
+      success: true,
+      serverTime,
+      module: 'investors',
+      total,
+      hasMore: numOffset + investors.length < total,
+      data: investors,
+    });
+  }
+
+  if (module === 'investorTransactions') {
+    const [transactions, total] = await Promise.all([
+      InvestorTransaction.find({})
+        .sort({ transactionDate: -1, createdAt: -1 })
+        .skip(numOffset)
+        .limit(numLimit),
+      InvestorTransaction.countDocuments({}),
+    ]);
+    return res.json({
+      success: true,
+      serverTime,
+      module: 'investorTransactions',
+      total,
+      hasMore: numOffset + transactions.length < total,
+      data: transactions,
+    });
+  }
+
+  if (module === 'withdrawals') {
+    const [withdrawals, total] = await Promise.all([
+      Withdrawal.find({})
+        .populate('investorId', 'name investorId')
+        .sort({ createdAt: -1 })
+        .skip(numOffset)
+        .limit(numLimit),
+      Withdrawal.countDocuments({}),
+    ]);
+    return res.json({
+      success: true,
+      serverTime,
+      module: 'withdrawals',
+      total,
+      hasMore: numOffset + withdrawals.length < total,
+      data: withdrawals,
+    });
+  }
+
+  if (module === 'ownerTransactions') {
+    const [transactions, total] = await Promise.all([
+      OwnerTransaction.find({})
+        .sort({ transactionDate: -1, createdAt: -1 })
+        .skip(numOffset)
+        .limit(numLimit),
+      OwnerTransaction.countDocuments({}),
+    ]);
+    return res.json({
+      success: true,
+      serverTime,
+      module: 'ownerTransactions',
+      total,
+      hasMore: numOffset + transactions.length < total,
+      data: transactions,
     });
   }
 
@@ -150,17 +341,55 @@ const bootstrapSync = asyncHandler(async (req, res) => {
     getDashboardSummary().catch(() => null),
   ]);
 
-  const totalCustomers = await Customer.countDocuments({ isDeleted: { $ne: true } });
+  const [
+    totalCustomers,
+    totalPlans,
+    totalInstallments,
+    totalPayments,
+    totalInvestors,
+    totalInvestorTransactions,
+    totalWithdrawals,
+    totalOwnerTransactions,
+  ] = await Promise.all([
+    Customer.countDocuments({ isDeleted: { $ne: true } }),
+    InstallmentPlan.countDocuments({ isDeleted: { $ne: true } }),
+    Installment.countDocuments({}),
+    Payment.countDocuments({}),
+    Investor.countDocuments({ isDeleted: { $ne: true } }),
+    InvestorTransaction.countDocuments({}),
+    Withdrawal.countDocuments({}),
+    OwnerTransaction.countDocuments({}),
+  ]);
+
+  const hasMore =
+    numOffset + customers.length < totalCustomers ||
+    plans.length < totalPlans ||
+    installments.length < totalInstallments ||
+    payments.length < totalPayments ||
+    investors.length < totalInvestors ||
+    investorTransactions.length < totalInvestorTransactions ||
+    withdrawals.length < totalWithdrawals ||
+    ownerTransactions.length < totalOwnerTransactions;
 
   const [investorSummaries, reports] = await Promise.all([
     computeInvestorSummaries(investors),
-    computeCommonReports(plans),
+    computeCommonReports(plans, installments, payments),
   ]);
 
   res.json({
     success: true,
     serverTime,
-    hasMore: numOffset + customers.length < totalCustomers,
+    hasMore,
+    counts: {
+      customers: totalCustomers,
+      plans: totalPlans,
+      installments: totalInstallments,
+      payments: totalPayments,
+      investors: totalInvestors,
+      investorTransactions: totalInvestorTransactions,
+      withdrawals: totalWithdrawals,
+      ownerTransactions: totalOwnerTransactions,
+    },
     data: {
       customers,
       plans,
@@ -229,7 +458,7 @@ const deltaSync = asyncHandler(async (req, res) => {
 
   const [investorSummaries, reports] = await Promise.all([
     computeInvestorSummaries(investors),
-    computeCommonReports(plans),
+    computeCommonReports(plans, installments, payments),
   ]);
 
   res.json({

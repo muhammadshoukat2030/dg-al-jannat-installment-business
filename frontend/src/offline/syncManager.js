@@ -146,54 +146,137 @@ export async function triggerSync() {
 }
 
 /**
+ * Fetches remaining pages for a given module until all records are stored locally.
+ * Throws on failure to prevent incomplete bootstrap from being marked as complete.
+ */
+async function fetchAllModulePages(moduleName, storeName, initialCount = 0) {
+  let offset = initialCount;
+  let hasMore = true;
+  const limit = 200;
+
+  while (hasMore) {
+    const res = await client.get('/sync/bootstrap', {
+      params: { module: moduleName, offset, limit },
+    });
+    if (res.data?.success && Array.isArray(res.data?.data)) {
+      if (res.data.data.length > 0) {
+        await putMany(storeName, res.data.data);
+        offset += res.data.data.length;
+      }
+      hasMore = res.data.hasMore === true && res.data.data.length > 0;
+    } else {
+      throw new Error(`Failed to download page for module ${moduleName} at offset ${offset}`);
+    }
+  }
+}
+
+/**
  * Initial bulk download of essential business records for offline enablement.
+ * Guarantees that ALL records and required categories are fully persisted
+ * before initialSyncCompleted is marked true.
  */
 async function performBootstrapSync() {
   const res = await client.get('/sync/bootstrap');
-  if (res.data?.success && res.data?.data) {
-    const {
-      customers,
-      plans,
-      installments,
-      payments,
-      investors,
-      investorTransactions,
-      withdrawals,
-      ownerTransactions,
-      settings,
-      ownerData,
-      dashboard,
-      investorSummaries,
-      reports,
-    } = res.data.data;
-
-    await Promise.all([
-      putMany('customers', customers || []),
-      putMany('installmentPlans', plans || []),
-      putMany('installments', installments || []),
-      putMany('payments', payments || []),
-      putMany('investors', investors || []),
-      putMany('investorTransactions', investorTransactions || []),
-      putMany('withdrawals', withdrawals || []),
-      putMany('ownerTransactions', ownerTransactions || []),
-    ]);
-
-    if (settings) await setMetadata('businessSettings', settings);
-    if (ownerData) await setMetadata('ownerData', ownerData);
-    if (investorSummaries) await setMetadata('cachedInvestorSummaries', investorSummaries);
-    if (reports) {
-      for (const [key, rows] of Object.entries(reports)) {
-        await setReportOffline(key, rows);
-      }
-    }
-    if (dashboard) {
-      await setMetadata('cachedDashboardSummary', dashboard);
-      if (dashboard.investorOverview) {
-        await setMetadata('cachedInvestorOverview', dashboard.investorOverview);
-      }
-    }
-    await setMetadata('initialSyncCompleted', true);
+  if (!res.data?.success || !res.data?.data) {
+    throw new Error('Bootstrap sync response was unsuccessful or empty.');
   }
+
+  const {
+    customers,
+    plans,
+    installments,
+    payments,
+    investors,
+    investorTransactions,
+    withdrawals,
+    ownerTransactions,
+    settings,
+    ownerData,
+    dashboard,
+    investorSummaries,
+    reports,
+  } = res.data.data;
+
+  // Strict validation: Verify every required category is provided by the server
+  if (
+    !Array.isArray(customers) ||
+    !Array.isArray(plans) ||
+    !Array.isArray(installments) ||
+    !Array.isArray(payments) ||
+    !Array.isArray(investors) ||
+    !Array.isArray(investorTransactions) ||
+    !Array.isArray(withdrawals) ||
+    !Array.isArray(ownerTransactions) ||
+    !settings ||
+    !ownerData ||
+    !dashboard ||
+    !reports
+  ) {
+    throw new Error('Bootstrap data is missing one or more required business categories.');
+  }
+
+  // 1. Atomically store initial batch into IndexedDB
+  await Promise.all([
+    putMany('customers', customers),
+    putMany('installmentPlans', plans),
+    putMany('installments', installments),
+    putMany('payments', payments),
+    putMany('investors', investors),
+    putMany('investorTransactions', investorTransactions),
+    putMany('withdrawals', withdrawals),
+    putMany('ownerTransactions', ownerTransactions),
+  ]);
+
+  if (settings) await setMetadata('businessSettings', settings);
+  if (ownerData) await setMetadata('ownerData', ownerData);
+  if (investorSummaries) await setMetadata('cachedInvestorSummaries', investorSummaries);
+  if (reports) {
+    for (const [key, rows] of Object.entries(reports)) {
+      await setReportOffline(key, rows);
+    }
+  }
+  if (dashboard) {
+    await setMetadata('cachedDashboardSummary', dashboard);
+    if (dashboard.investorOverview) {
+      await setMetadata('cachedInvestorOverview', dashboard.investorOverview);
+    }
+  }
+
+  // 2. If counts indicate more records for ANY category, paginate until all are downloaded
+  const counts = res.data.counts || {};
+  const paginationTasks = [];
+
+  if ((counts.customers || 0) > customers.length) {
+    paginationTasks.push(fetchAllModulePages('customers', 'customers', customers.length));
+  }
+  if ((counts.plans || 0) > plans.length) {
+    paginationTasks.push(fetchAllModulePages('plans', 'installmentPlans', plans.length));
+  }
+  if ((counts.installments || 0) > installments.length) {
+    paginationTasks.push(fetchAllModulePages('installments', 'installments', installments.length));
+  }
+  if ((counts.payments || 0) > payments.length) {
+    paginationTasks.push(fetchAllModulePages('payments', 'payments', payments.length));
+  }
+  if ((counts.investors || 0) > investors.length) {
+    paginationTasks.push(fetchAllModulePages('investors', 'investors', investors.length));
+  }
+  if ((counts.investorTransactions || 0) > investorTransactions.length) {
+    paginationTasks.push(fetchAllModulePages('investorTransactions', 'investorTransactions', investorTransactions.length));
+  }
+  if ((counts.withdrawals || 0) > withdrawals.length) {
+    paginationTasks.push(fetchAllModulePages('withdrawals', 'withdrawals', withdrawals.length));
+  }
+  if ((counts.ownerTransactions || 0) > ownerTransactions.length) {
+    paginationTasks.push(fetchAllModulePages('ownerTransactions', 'ownerTransactions', ownerTransactions.length));
+  }
+
+  if (paginationTasks.length > 0) {
+    await Promise.all(paginationTasks);
+  }
+
+  // 3. ONLY mark bootstrap complete once all categories and paginated records are fully written
+  await setMetadata('initialSyncCompleted', true);
 }
 
 /**

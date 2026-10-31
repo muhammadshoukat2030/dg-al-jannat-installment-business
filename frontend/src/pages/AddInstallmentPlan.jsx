@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
+import { WifiOff } from 'lucide-react';
 import { customerApi, planApi } from '../api/services';
 import { DURATION_OPTIONS } from '../utils/durationOptions';
 import FundingSourceSelector from '../components/investors/FundingSourceSelector';
+import { get } from '../offline/db';
 
 const empty = {
   productName: '',
@@ -26,9 +28,25 @@ export default function AddInstallmentPlan() {
   const [durationChoice, setDurationChoice] = useState('10');
   const [funding, setFunding] = useState({ fundingSource: 'BUSINESS', investorId: null, capitalDeployed: 0 });
   const [saving, setSaving] = useState(false);
+  const isOffline = typeof navigator !== 'undefined' ? !navigator.onLine : false;
 
   useEffect(() => {
-    customerApi.get(id).then((res) => setCustomer(res.data.data.customer));
+    // 1. Immediate local-first load from IndexedDB
+    get('customers', id)
+      .then((cached) => {
+        if (cached) setCustomer(cached);
+      })
+      .catch(() => {});
+
+    // 2. Server revalidation when online
+    if (navigator.onLine) {
+      customerApi
+        .get(id)
+        .then((res) => {
+          if (res.data?.data?.customer) setCustomer(res.data.data.customer);
+        })
+        .catch(() => {});
+    }
   }, [id]);
 
   function update(field, value) {
@@ -41,6 +59,10 @@ export default function AddInstallmentPlan() {
 
   async function handleSubmit(e) {
     e.preventDefault();
+    if (!navigator.onLine) {
+      toast.error('Creating an installment contract requires an active online connection to verify capital balances and generate installment schedules.');
+      return;
+    }
     const duration = durationChoice === 'custom' ? Number(plan.customDuration) : Number(durationChoice);
     if (!plan.productName || !plan.purchaseCost || !plan.sellingPrice || !plan.monthlyInstallment || !duration || !plan.firstDueDate) {
       toast.error('Please complete all required fields.');
@@ -90,6 +112,14 @@ export default function AddInstallmentPlan() {
   return (
     <div className="max-w-2xl mx-auto space-y-6">
       <h1 className="text-xl font-bold">New Installment Contract — {customer.name}</h1>
+      {isOffline && (
+        <div className="bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-300 px-4 py-3 rounded-xl text-xs flex items-center gap-2">
+          <WifiOff className="w-4 h-4 shrink-0 text-amber-500" />
+          <span>
+            <strong>Offline Notice:</strong> You are currently offline. Viewing and planning contracts is available locally; final contract commitment requires an active connection to verify investor capital.
+          </span>
+        </div>
+      )}
       <form onSubmit={handleSubmit} className="card space-y-4">
         <div className="grid sm:grid-cols-2 gap-4">
           <div className="sm:col-span-2">
