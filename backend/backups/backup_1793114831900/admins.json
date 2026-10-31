@@ -1,0 +1,11 @@
+[
+  {
+    "_id": "6aa41f45fbfe9df698d5fc1e",
+    "name": "Owner",
+    "email": "admin@localhost.com",
+    "password": "$2a$10$o7ovtgLsxMSI2pyRht3oy.mlW7KLvWJ3c732SfDFwF73O3VgnN.HG",
+    "createdAt": "2026-09-11T15:33:25.182Z",
+    "updatedAt": "2026-09-11T15:33:25.182Z",
+    "__v": 0
+  }
+]

@@ -1,0 +1,156 @@
+[
+  {
+    "_id": "6adb82f55100b0aeac7b5822",
+    "investorId": "6adb81495100b0aeac7b567a",
+    "transactionType": "INVESTMENT_IN",
+    "amount": 10000,
+    "transactionDate": "2026-10-23T00:00:00.000Z",
+    "notes": "",
+    "createdAt": "2026-10-23T15:53:25.849Z",
+    "updatedAt": "2026-10-23T15:53:25.849Z",
+    "__v": 0
+  },
+  {
+    "_id": "6adb83295100b0aeac7b587f",
+    "investorId": "6adb83295100b0aeac7b587b",
+    "transactionType": "INVESTMENT_IN",
+    "amount": 10000,
+    "transactionDate": "2026-10-23T15:54:17.773Z",
+    "notes": "Initial investment",
+    "createdAt": "2026-10-23T15:54:17.773Z",
+    "updatedAt": "2026-10-23T15:54:17.773Z",
+    "__v": 0
+  },
+  {
+    "_id": "6adb85955100b0aeac7b5adf",
+    "investorId": "6adb83295100b0aeac7b587b",
+    "transactionType": "PROFIT_TO_CAPITAL",
+    "amount": 500,
+    "transactionDate": "2026-10-23T00:00:00.000Z",
+    "notes": "Profit withdrawal (ref: 6adb85955100b0aeac7b5add)",
+    "createdAt": "2026-10-23T16:04:37.709Z",
+    "updatedAt": "2026-10-24T12:27:35.073Z",
+    "__v": 0
+  },
+  {
+    "_id": "6adb85fe5100b0aeac7b5b3a",
+    "investorId": "6adb83295100b0aeac7b587b",
+    "transactionType": "PROFIT_TO_CAPITAL",
+    "amount": 500,
+    "transactionDate": "2026-10-23T00:00:00.000Z",
+    "notes": "Profit withdrawal (ref: 6adb85fe5100b0aeac7b5b38)",
+    "createdAt": "2026-10-23T16:06:22.567Z",
+    "updatedAt": "2026-10-24T12:27:35.081Z",
+    "__v": 0
+  },
+  {
+    "_id": "6adb86375100b0aeac7b5b95",
+    "investorId": "6adb83295100b0aeac7b587b",
+    "transactionType": "PROFIT_TO_CAPITAL",
+    "amount": 50,
+    "transactionDate": "2026-10-23T00:00:00.000Z",
+    "notes": "Profit withdrawal (ref: 6adb86375100b0aeac7b5b93)",
+    "createdAt": "2026-10-23T16:07:19.859Z",
+    "updatedAt": "2026-10-24T12:27:35.085Z",
+    "__v": 0
+  },
+  {
+    "_id": "6adb865b5100b0aeac7b5bf6",
+    "investorId": "6adb83295100b0aeac7b587b",
+    "transactionType": "PROFIT_TO_CAPITAL",
+    "amount": 450,
+    "transactionDate": "2026-10-23T00:00:00.000Z",
+    "notes": "Profit withdrawal (ref: 6adb865b5100b0aeac7b5bf4)",
+    "createdAt": "2026-10-23T16:07:55.813Z",
+    "updatedAt": "2026-10-24T12:27:35.088Z",
+    "__v": 0
+  },
+  {
+    "_id": "6adb86865100b0aeac7b5c51",
+    "investorId": "6adb81495100b0aeac7b567a",
+    "transactionType": "PROFIT_TO_CAPITAL",
+    "amount": 1500,
+    "transactionDate": "2026-10-23T00:00:00.000Z",
+    "notes": "Profit withdrawal (ref: 6adb86865100b0aeac7b5c4f)",
+    "createdAt": "2026-10-23T16:08:38.189Z",
+    "updatedAt": "2026-10-24T12:27:35.095Z",
+    "__v": 0
+  },
+  {
+    "_id": "6adcab611d58f0d7fc3bdbc4",
+    "investorId": "6adcab611d58f0d7fc3bdbc0",
+    "transactionType": "INVESTMENT_IN",
+    "amount": 20000,
+    "transactionDate": "2026-10-24T12:58:09.609Z",
+    "notes": "Initial investment",
+    "createdAt": "2026-10-24T12:58:09.611Z",
+    "updatedAt": "2026-10-24T12:58:09.611Z",
+    "__v": 0
+  },
+  {
+    "_id": "6adcabbc1d58f0d7fc3bdc6d",
+    "investorId": "6adcabbc1d58f0d7fc3bdc69",
+    "transactionType": "INVESTMENT_IN",
+    "amount": 19999,
+    "transactionDate": "2026-10-24T12:59:40.620Z",
+    "notes": "Initial investment",
+    "createdAt": "2026-10-24T12:59:40.620Z",
+    "updatedAt": "2026-10-24T12:59:40.620Z",
+    "__v": 0
+  },
+  {
+    "_id": "6adcaf0e1d58f0d7fc3be158",
+    "investorId": "6adb81495100b0aeac7b567a",
+    "transactionType": "RETURN_TO_INVESTOR",
+    "amount": 10000,
+    "transactionDate": "2026-10-24T00:00:00.000Z",
+    "notes": "",
+    "createdAt": "2026-10-24T13:13:50.028Z",
+    "updatedAt": "2026-10-24T13:13:50.028Z",
+    "__v": 0
+  },
+  {
+    "_id": "6adcaf201d58f0d7fc3be184",
+    "investorId": "6adb81495100b0aeac7b567a",
+    "transactionType": "RETURN_TO_INVESTOR",
+    "amount": 1500,
+    "transactionDate": "2026-10-24T00:00:00.000Z",
+    "notes": "",
+    "createdAt": "2026-10-24T13:14:08.876Z",
+    "updatedAt": "2026-10-24T13:14:08.876Z",
+    "__v": 0
+  },
+  {
+    "_id": "6ade252c06c834d913f29d9b",
+    "investorId": "6adb83295100b0aeac7b587b",
+    "transactionType": "ADJUSTMENT",
+    "amount": 1000,
+    "transactionDate": "2026-10-25T00:00:00.000Z",
+    "notes": "",
+    "createdAt": "2026-10-25T15:50:04.990Z",
+    "updatedAt": "2026-10-25T15:50:04.990Z",
+    "__v": 0
+  },
+  {
+    "_id": "6ade2adf4bcd5873526597bd",
+    "investorId": "6adcab611d58f0d7fc3bdbc0",
+    "transactionType": "PROFIT_WITHDRAWAL",
+    "amount": 3000,
+    "transactionDate": "2026-10-25T00:00:00.000Z",
+    "notes": "Profit withdrawal (ref: 6ade2adf4bcd5873526597bb)",
+    "createdAt": "2026-10-25T16:14:23.125Z",
+    "updatedAt": "2026-10-25T16:14:23.125Z",
+    "__v": 0
+  },
+  {
+    "_id": "6ade2e314bcd587352659fa6",
+    "investorId": "6adcabbc1d58f0d7fc3bdc69",
+    "transactionType": "PROFIT_WITHDRAWAL",
+    "amount": 2999.85,
+    "transactionDate": "2026-10-25T00:00:00.000Z",
+    "notes": "Profit withdrawal (ref: 6ade2e314bcd587352659fa4)",
+    "createdAt": "2026-10-25T16:28:33.413Z",
+    "updatedAt": "2026-10-25T16:28:33.413Z",
+    "__v": 0
+  }
+]

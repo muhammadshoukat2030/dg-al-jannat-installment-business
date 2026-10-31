@@ -27,6 +27,7 @@ const getInstallment = asyncHandler(async (req, res) => {
 
 const payInstallment = asyncHandler(async (req, res) => {
   const { amount, paymentMethod, paymentDate, notes } = req.body;
+  const operationId = req.body.operationId || req.headers['x-operation-id'] || req.headers['idempotency-key'] || null;
   if (amount === 0) {
     return res.status(400).json({
       success: false,
@@ -39,6 +40,7 @@ const payInstallment = asyncHandler(async (req, res) => {
     paymentMethod,
     paymentDate,
     notes,
+    operationId,
   });
   res.json({ success: true, data: result });
 });

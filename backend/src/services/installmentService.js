@@ -112,8 +112,20 @@ async function recalcPlanTotals(planId) {
 /**
  * Record an actual payment against an installment. amount MUST be > 0.
  * Creates a Payment record and updates the installment + plan totals.
+ * Includes server-side idempotency protection via unique operationId.
  */
-async function recordPayment({ installmentId, amount, paymentMethod, paymentDate, notes }) {
+async function recordPayment({ installmentId, amount, paymentMethod, paymentDate, notes, operationId }) {
+  if (operationId) {
+    const existingPayment = await Payment.findOne({ operationId });
+    if (existingPayment) {
+      const [inst, pl] = await Promise.all([
+        Installment.findById(existingPayment.installmentId),
+        InstallmentPlan.findById(existingPayment.planId),
+      ]);
+      return { installment: inst, plan: pl, payment: existingPayment, idempotentReplay: true };
+    }
+  }
+
   if (!(amount > 0)) {
     const err = new Error('Payment amount must be greater than 0. Use the missed-installment endpoint to record a 0 payment.');
     err.statusCode = 400;
@@ -149,19 +161,31 @@ async function recordPayment({ installmentId, amount, paymentMethod, paymentDate
   const updatedPlan = await recalcPlanTotals(plan._id);
 
   const receiptNumber = await generateReceiptNumber();
-  const payment = await Payment.create({
-    customerId: installment.customerId,
-    planId: installment.planId,
-    installmentId: installment._id,
-    investorId: installment.investorId || null,
-    amount,
-    paymentDate: installment.paymentDate,
-    paymentMethod: paymentMethod || 'Cash',
-    receiptNumber,
-    previousBalance,
-    newBalance: updatedPlan.remainingAmount,
-    notes: notes || '',
-  });
+  let payment;
+  try {
+    payment = await Payment.create({
+      customerId: installment.customerId,
+      planId: installment.planId,
+      installmentId: installment._id,
+      investorId: installment.investorId || null,
+      amount,
+      paymentDate: installment.paymentDate,
+      paymentMethod: paymentMethod || 'Cash',
+      receiptNumber,
+      previousBalance,
+      newBalance: updatedPlan.remainingAmount,
+      notes: notes || '',
+      operationId: operationId || undefined,
+    });
+  } catch (err) {
+    if (err.code === 11000 && operationId && (err.keyPattern?.operationId || (err.message && err.message.includes('operationId')))) {
+      const existingPayment = await Payment.findOne({ operationId });
+      if (existingPayment) {
+        return { installment, plan: updatedPlan, payment: existingPayment, idempotentReplay: true };
+      }
+    }
+    throw err;
+  }
 
   await safelyRecalculateProfitDistribution(plan._id);
 

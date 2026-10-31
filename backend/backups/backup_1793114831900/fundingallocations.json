@@ -1,0 +1,52 @@
+[
+  {
+    "_id": "6adb841f5100b0aeac7b5926",
+    "planId": "6adb841f5100b0aeac7b58f6",
+    "sourceType": "INVESTOR",
+    "investorId": "6adb83295100b0aeac7b587b",
+    "amount": 10000,
+    "__v": 0,
+    "createdAt": "2026-10-23T15:58:23.965Z",
+    "updatedAt": "2026-10-23T15:58:23.965Z"
+  },
+  {
+    "_id": "6adb841f5100b0aeac7b5927",
+    "planId": "6adb841f5100b0aeac7b58f6",
+    "sourceType": "INVESTOR",
+    "investorId": "6adb81495100b0aeac7b567a",
+    "amount": 10000,
+    "__v": 0,
+    "createdAt": "2026-10-23T15:58:23.965Z",
+    "updatedAt": "2026-10-23T15:58:23.965Z"
+  },
+  {
+    "_id": "6ade2ab24bcd5873526596d7",
+    "planId": "6ade2ab24bcd5873526596b3",
+    "sourceType": "INVESTOR",
+    "investorId": "6adcab611d58f0d7fc3bdbc0",
+    "amount": 20000,
+    "__v": 0,
+    "createdAt": "2026-10-25T16:13:38.991Z",
+    "updatedAt": "2026-10-25T16:13:38.991Z"
+  },
+  {
+    "_id": "6ade2d454bcd587352659b86",
+    "planId": "6ade2d454bcd587352659b57",
+    "sourceType": "INVESTOR",
+    "investorId": "6adcabbc1d58f0d7fc3bdc69",
+    "amount": 19999,
+    "__v": 0,
+    "createdAt": "2026-10-25T16:24:37.632Z",
+    "updatedAt": "2026-10-25T16:24:37.632Z"
+  },
+  {
+    "_id": "6ade2d454bcd587352659b87",
+    "planId": "6ade2d454bcd587352659b57",
+    "sourceType": "INVESTOR",
+    "investorId": "6adb83295100b0aeac7b587b",
+    "amount": 1,
+    "__v": 0,
+    "createdAt": "2026-10-25T16:24:37.632Z",
+    "updatedAt": "2026-10-25T16:24:37.632Z"
+  }
+]

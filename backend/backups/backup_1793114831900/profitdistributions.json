@@ -1,0 +1,102 @@
+[
+  {
+    "_id": "6adb841f51f089ee4f35c3bf",
+    "planId": "6adb841f5100b0aeac7b58f6",
+    "__v": 0,
+    "calculatedAt": "2026-10-23T16:14:10.219Z",
+    "capitalStillDeployed": 0,
+    "createdAt": "2026-10-23T15:58:23.970Z",
+    "investorProfitPool": 3000,
+    "investorRecoveredCapital": 20000,
+    "investorShares": [
+      {
+        "investorId": "6adb83295100b0aeac7b587b",
+        "fundedAmount": 10000,
+        "fundedSharePercent": 50,
+        "profitShare": 1500,
+        "recoveredCapital": 10000,
+        "capitalStillDeployed": 0
+      },
+      {
+        "investorId": "6adb81495100b0aeac7b567a",
+        "fundedAmount": 10000,
+        "fundedSharePercent": 50,
+        "profitShare": 1500,
+        "recoveredCapital": 10000,
+        "capitalStillDeployed": 0
+      }
+    ],
+    "ownerProfit": 3000,
+    "ownerRecoveredCapital": 0,
+    "realizedProfit": 6000,
+    "recoveredCapital": 20000,
+    "sellingPrice": 26000,
+    "totalCollected": 26000,
+    "totalExpectedProfit": 6000,
+    "updatedAt": "2026-10-23T16:14:10.219Z"
+  },
+  {
+    "_id": "6ade2ab351f089ee4f35c3c0",
+    "planId": "6ade2ab24bcd5873526596b3",
+    "__v": 0,
+    "calculatedAt": "2026-10-25T16:13:38.999Z",
+    "capitalStillDeployed": 20000,
+    "createdAt": "2026-10-25T16:13:38.999Z",
+    "investorProfitPool": 3000,
+    "investorRecoveredCapital": 0,
+    "investorShares": [
+      {
+        "investorId": "6adcab611d58f0d7fc3bdbc0",
+        "fundedAmount": 20000,
+        "fundedSharePercent": 100,
+        "profitShare": 3000,
+        "recoveredCapital": 0,
+        "capitalStillDeployed": 20000
+      }
+    ],
+    "ownerProfit": 3000,
+    "ownerRecoveredCapital": 0,
+    "realizedProfit": 6000,
+    "recoveredCapital": 0,
+    "sellingPrice": 26000,
+    "totalCollected": 6000,
+    "totalExpectedProfit": 6000,
+    "updatedAt": "2026-10-25T16:13:38.999Z"
+  },
+  {
+    "_id": "6ade2d4551f089ee4f35c3c1",
+    "planId": "6ade2d454bcd587352659b57",
+    "__v": 0,
+    "calculatedAt": "2026-10-25T16:24:37.640Z",
+    "capitalStillDeployed": 20000,
+    "createdAt": "2026-10-25T16:24:37.640Z",
+    "investorProfitPool": 3000,
+    "investorRecoveredCapital": 0,
+    "investorShares": [
+      {
+        "investorId": "6adcabbc1d58f0d7fc3bdc69",
+        "fundedAmount": 19999,
+        "fundedSharePercent": 100,
+        "profitShare": 2999.85,
+        "recoveredCapital": 0,
+        "capitalStillDeployed": 19999
+      },
+      {
+        "investorId": "6adb83295100b0aeac7b587b",
+        "fundedAmount": 1,
+        "fundedSharePercent": 0.01,
+        "profitShare": 0.15,
+        "recoveredCapital": 0,
+        "capitalStillDeployed": 1
+      }
+    ],
+    "ownerProfit": 3000,
+    "ownerRecoveredCapital": 0,
+    "realizedProfit": 6000,
+    "recoveredCapital": 0,
+    "sellingPrice": 26000,
+    "totalCollected": 6000,
+    "totalExpectedProfit": 6000,
+    "updatedAt": "2026-10-25T16:24:37.640Z"
+  }
+]

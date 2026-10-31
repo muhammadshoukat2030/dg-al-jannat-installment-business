@@ -14,6 +14,7 @@ const customerSchema = new mongoose.Schema(
     notes: { type: String, trim: true, default: '' },
     isArchived: { type: Boolean, default: false },
     isDeleted: { type: Boolean, default: false },
+    operationId: { type: String, sparse: true, unique: true, index: true },
   },
   { timestamps: true }
 );

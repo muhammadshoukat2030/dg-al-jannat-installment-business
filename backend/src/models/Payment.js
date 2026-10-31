@@ -19,6 +19,7 @@ const paymentSchema = new mongoose.Schema(
     newBalance: { type: Number, required: true },
 
     notes: { type: String, default: '' },
+    operationId: { type: String, sparse: true, unique: true, index: true },
   },
   { timestamps: true }
 );
