@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { investorApi, ownerApi } from '../../api/services';
 import { formatCurrency } from '../../utils/format';
+import { queryInvestorsOffline, getOwnerDataOffline } from '../../offline/db';
 
 /**
  * Multiple Funding Sources selector for use during contract creation.
@@ -32,18 +33,36 @@ export default function MultiFundingSelector({ purchaseCost, onChange }) {
   // ── Load investors + owner capital once ────────────────────────────────────
   useEffect(() => {
     setLoadingData(true);
+    // 1. Immediate local-first read from IndexedDB
     Promise.all([
-      investorApi.list({ status: 'active', limit: 200 }),
-      ownerApi.capital(),
-    ])
-      .then(([invRes, ownerRes]) => {
-        setInvestors(invRes.data.data || []);
-        setOwnerCapital(ownerRes.data.data);
-      })
-      .catch(() => {
-        // keep null — validation will block submit
-      })
-      .finally(() => setLoadingData(false));
+      queryInvestorsOffline({ status: 'active', limit: 200 }).catch(() => null),
+      getOwnerDataOffline().catch(() => null),
+    ]).then(([localInv, localOwner]) => {
+      if (localInv?.data && localInv.data.length > 0) {
+        setInvestors(localInv.data);
+      }
+      if (localOwner?.capital) {
+        setOwnerCapital(localOwner.capital);
+      }
+    });
+
+    // 2. Server revalidation when online
+    if (navigator.onLine) {
+      Promise.all([
+        investorApi.list({ status: 'active', limit: 200 }),
+        ownerApi.capital(),
+      ])
+        .then(([invRes, ownerRes]) => {
+          setInvestors(invRes.data.data || []);
+          setOwnerCapital(ownerRes.data.data);
+        })
+        .catch(() => {
+          // retain local data if offline
+        })
+        .finally(() => setLoadingData(false));
+    } else {
+      setLoadingData(false);
+    }
   }, []);
 
   // ── Derived math (paisa) ───────────────────────────────────────────────────

@@ -7,7 +7,7 @@ import { formatCurrency } from '../utils/format';
 import DeleteInvestorModal from '../components/investors/DeleteInvestorModal';
 import StatusBadge from '../components/common/StatusBadge';
 import { useSmartScroll } from '../hooks/useSmartScroll';
-import { queryInvestorsOffline } from '../offline/db';
+import { queryInvestorsOffline, getMetadata } from '../offline/db';
 
 export default function Investors() {
   const [overview, setOverview] = useState(null);
@@ -42,10 +42,24 @@ export default function Investors() {
   });
 
   useEffect(() => {
-    investorApi
-      .dashboardOverview()
-      .then((res) => setOverview(res.data.data.overview))
+    // 1. Immediate local-first read from IndexedDB metadata
+    getMetadata('cachedInvestorOverview')
+      .then((cached) => {
+        if (cached) setOverview(cached);
+      })
       .catch(() => {});
+
+    // 2. Server revalidation when online
+    if (navigator.onLine) {
+      investorApi
+        .dashboardOverview()
+        .then((res) => {
+          if (res.data?.data?.overview) {
+            setOverview(res.data.data.overview);
+          }
+        })
+        .catch(() => {});
+    }
   }, []);
 
   return (

@@ -17,6 +17,7 @@ import {
   queryInstallmentsOffline,
   queryPaymentsOffline,
   queryWithdrawalsOffline,
+  queryInvestorFundedCustomersOffline,
   put,
   enqueueOperation,
 } from '../offline/db';
@@ -490,10 +491,28 @@ function FundedCustomersTab({ investorId }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    investorApi
-      .fundedCustomers(investorId, { page: 1, limit: 50 })
-      .then((res) => setRows(res.data.data))
-      .finally(() => setLoading(false));
+    // 1. Immediate local-first load from IndexedDB
+    queryInvestorFundedCustomersOffline({ investorId, page: 1, limit: 50 })
+      .then((local) => {
+        if (local && local.data.length > 0) {
+          setRows(local.data);
+          setLoading(false);
+        }
+      })
+      .catch(() => {});
+
+    // 2. Server revalidation when online
+    if (navigator.onLine) {
+      investorApi
+        .fundedCustomers(investorId, { page: 1, limit: 50 })
+        .then((res) => {
+          if (res.data?.data) setRows(res.data.data);
+        })
+        .catch(() => {})
+        .finally(() => setLoading(false));
+    } else {
+      setLoading(false);
+    }
   }, [investorId]);
 
   if (loading) return <p className="text-center text-gray-400 py-6">Loading...</p>;

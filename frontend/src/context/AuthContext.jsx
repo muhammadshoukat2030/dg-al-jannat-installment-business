@@ -19,11 +19,28 @@ export function AuthProvider({ children }) {
     }
     client
       .get('/auth/me')
-      .then((res) => setAdmin(res.data.admin))
-      .catch(() => {
-        localStorage.removeItem('ims_token');
-        localStorage.removeItem('ims_admin');
-        setAdmin(null);
+      .then((res) => {
+        setAdmin(res.data.admin);
+        localStorage.setItem('ims_admin', JSON.stringify(res.data.admin));
+      })
+      .catch((err) => {
+        // Only invalidate stored credentials on an explicit 401 Unauthorized from the server.
+        // On network errors (offline, server unreachable, timeout), preserve existing session
+        // so the user can continue working offline seamlessly.
+        if (err.response?.status === 401) {
+          localStorage.removeItem('ims_token');
+          localStorage.removeItem('ims_admin');
+          setAdmin(null);
+        } else {
+          const stored = localStorage.getItem('ims_admin');
+          if (stored) {
+            try {
+              setAdmin(JSON.parse(stored));
+            } catch {
+              // Ignore JSON parse error
+            }
+          }
+        }
       })
       .finally(() => setLoading(false));
   }, []);

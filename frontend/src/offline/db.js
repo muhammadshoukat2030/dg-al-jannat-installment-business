@@ -617,3 +617,59 @@ export async function queryOwnerFundedCustomersOffline({ search, page = 1, limit
     pages: Math.ceil(total / limit) || 1,
   };
 }
+
+export async function queryInvestorFundedCustomersOffline({ investorId, search, page = 1, limit = 20 } = {}) {
+  const [plans, customers] = await Promise.all([
+    getAll('installmentPlans'),
+    getAll('customers'),
+  ]);
+
+  const customerMap = new Map();
+  customers.forEach((c) => customerMap.set(String(c._id), c));
+
+  const invPlans = plans.filter((p) => {
+    if (p.isDeleted) return false;
+    const inv = p.investorId?._id || p.investorId;
+    return String(inv) === String(investorId);
+  });
+
+  const grouped = new Map();
+  invPlans.forEach((plan) => {
+    const cid = String(plan.customerId?._id || plan.customerId);
+    if (!grouped.has(cid)) {
+      grouped.set(cid, {
+        customer: customerMap.get(cid) || plan.customerId || { _id: cid, name: 'Unknown Customer' },
+        contractsFunded: 0,
+        deployed: 0,
+        collected: 0,
+        outstanding: 0,
+      });
+    }
+    const entry = grouped.get(cid);
+    entry.contractsFunded += 1;
+    entry.deployed += Number(plan.capitalDeployed || plan.purchaseCost || 0);
+    entry.collected += Number(plan.totalPaid || 0) + Number(plan.downPayment || 0);
+    entry.outstanding += Number(plan.remainingAmount || 0);
+  });
+
+  let rows = Array.from(grouped.values());
+
+  if (search && search.trim()) {
+    const s = search.toLowerCase().trim();
+    rows = rows.filter(
+      (r) =>
+        (r.customer?.name && r.customer.name.toLowerCase().includes(s)) ||
+        (r.customer?.contactNumber && r.customer.contactNumber.includes(s)) ||
+        (r.customer?.customerId && r.customer.customerId.toLowerCase().includes(s))
+    );
+  }
+
+  const total = rows.length;
+  const skip = (page - 1) * limit;
+  return {
+    data: rows.slice(skip, skip + limit),
+    total,
+    page,
+    pages: Math.ceil(total / limit) || 1,
+  };
+}

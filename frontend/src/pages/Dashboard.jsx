@@ -29,26 +29,70 @@ export default function Dashboard() {
   const [isOfflineCache, setIsOfflineCache] = useState(false);
 
   useEffect(() => {
-    Promise.all([dashboardApi.summary(), ownerApi.profit().catch(() => null)])
-      .then(([summaryRes, ownerRes]) => {
-        setData(summaryRes.data.data);
-        if (ownerRes) setOwnerProfit(ownerRes.data.data);
-        setIsOfflineCache(false);
-      })
-      .catch(async () => {
-        const cached = await getMetadata('cachedDashboardSummary');
-        if (cached) {
+    let isMounted = true;
+
+    // 1. Immediately read cached dashboard summary from IndexedDB
+    getMetadata('cachedDashboardSummary')
+      .then((cached) => {
+        if (cached && isMounted) {
           setData(cached);
-          setIsOfflineCache(true);
-        } else {
-          setError('Failed to load dashboard and no offline cache is available.');
+          setIsOfflineCache(!navigator.onLine);
+          setLoading(false);
         }
       })
-      .finally(() => setLoading(false));
+      .catch(() => {});
+
+    getMetadata('ownerData')
+      .then((ownerData) => {
+        if (ownerData?.profit && isMounted) {
+          setOwnerProfit(ownerData.profit);
+        }
+      })
+      .catch(() => {});
+
+    // 2. Fetch fresh live figures in background when online
+    if (navigator.onLine) {
+      Promise.all([dashboardApi.summary(), ownerApi.profit().catch(() => null)])
+        .then(([summaryRes, ownerRes]) => {
+          if (!isMounted) return;
+          if (summaryRes?.data?.data) {
+            setData(summaryRes.data.data);
+            setIsOfflineCache(false);
+          }
+          if (ownerRes?.data?.data) {
+            setOwnerProfit(ownerRes.data.data);
+          }
+        })
+        .catch(async () => {
+          if (!isMounted) return;
+          const cached = await getMetadata('cachedDashboardSummary');
+          if (cached) {
+            setData(cached);
+            setIsOfflineCache(true);
+          } else {
+            setData((prev) => {
+              if (!prev) setError('Failed to load dashboard and no offline cache is available.');
+              return prev;
+            });
+          }
+        })
+        .finally(() => {
+          if (isMounted) setLoading(false);
+        });
+    } else {
+      setIsOfflineCache(true);
+      setTimeout(() => {
+        if (isMounted) setLoading(false);
+      }, 50);
+    }
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
-  if (loading) return <div className="p-8 text-center text-gray-500">Loading dashboard...</div>;
-  if (error) return <div className="p-8 text-center text-red-500">{error}</div>;
+  if (loading && !data) return <div className="p-8 text-center text-gray-500">Loading dashboard...</div>;
+  if (error && !data) return <div className="p-8 text-center text-red-500">{error}</div>;
   if (!data) return null;
 
   const { business, financial, collection, installments, profitLoss, investorOverview, topInvestors, topOutstanding, overdueCustomers, recentPayments, recentCustomers } = data;

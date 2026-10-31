@@ -4,7 +4,7 @@ import { FileDown, FileSpreadsheet } from 'lucide-react';
 import { reportApi, exportApi } from '../api/services';
 import { formatCurrency, formatDate } from '../utils/format';
 import DateFilterBar from '../components/common/DateFilterBar';
-import { getReportOffline, setReportOffline } from '../offline/db';
+import { getReportOffline, setReportOffline, getAll } from '../offline/db';
 
 const REPORTS = [
   { key: 'profit', label: 'Profit Report', pdf: 'profitLossPdf', excel: 'profitLossExcel', dateBased: false },
@@ -25,34 +25,120 @@ export default function Reports() {
 
   const activeReport = REPORTS.find((r) => r.key === active);
 
+  async function computeOfflineReport(reportKey) {
+    try {
+      if (reportKey === 'profit' || reportKey === 'loss' || reportKey === 'outstanding') {
+        const plans = await getAll('installmentPlans');
+        if (reportKey === 'profit') {
+          return plans.map((p) => ({
+            customer: p.customerId,
+            product: p.productName,
+            purchaseCost: p.purchaseCost,
+            sellingPrice: p.sellingPrice,
+            expectedProfit: p.expectedProfit,
+            expectedLoss: p.expectedLoss,
+            profitMargin: Math.round((p.profitMargin || 0) * 100) / 100,
+            totalCollected: (p.totalPaid || 0) + (p.downPayment || 0),
+            remaining: p.remainingAmount,
+            status: p.status,
+          }));
+        }
+        if (reportKey === 'loss') return plans.filter((p) => (p.expectedLoss || 0) > 0);
+        if (reportKey === 'outstanding') {
+          return [...plans]
+            .filter((p) => (p.remainingAmount || 0) > 0)
+            .sort((a, b) => (b.remainingAmount || 0) - (a.remainingAmount || 0));
+        }
+      }
+      if (reportKey === 'overdue' || reportKey === 'missed') {
+        const installments = await getAll('installments');
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        if (reportKey === 'overdue') {
+          return installments
+            .filter((i) => i.status === 'OVERDUE' || (new Date(i.dueDate) < today && ((i.amountDue - (i.paidAmount || 0)) > 0)))
+            .map((i) => {
+              const d = new Date(i.dueDate);
+              d.setHours(0, 0, 0, 0);
+              return {
+                customer: i.customerId,
+                contract: i.planId,
+                installmentNumber: i.installmentNumber,
+                dueDate: i.dueDate,
+                daysOverdue: Math.max(0, Math.floor((today - d) / (1000 * 60 * 60 * 24))),
+                amountDue: i.amountDue,
+                paid: i.paidAmount || 0,
+                remaining: i.remainingAmount !== undefined ? i.remainingAmount : (i.amountDue - (i.paidAmount || 0)),
+              };
+            });
+        }
+        if (reportKey === 'missed') {
+          return installments
+            .filter((i) => i.status === 'MISSED')
+            .map((i) => ({
+              customerId: i.customerId,
+              installmentId: i,
+              recordedDate: i.updatedAt || i.dueDate,
+            }));
+        }
+      }
+      if (reportKey === 'daily' || reportKey === 'monthly') {
+        const payments = await getAll('payments');
+        const formatLen = reportKey === 'daily' ? 10 : 7;
+        const map = new Map();
+        payments.forEach((p) => {
+          if (!p.paymentDate) return;
+          const dStr = new Date(p.paymentDate).toISOString().slice(0, formatLen);
+          if (!map.has(dStr)) map.set(dStr, { _id: dStr, total: 0, count: 0 });
+          const entry = map.get(dStr);
+          entry.total += Number(p.amount || 0);
+          entry.count += 1;
+        });
+        return Array.from(map.values()).sort((a, b) => b._id.localeCompare(a._id));
+      }
+    } catch {
+      return [];
+    }
+    return [];
+  }
+
   async function loadReport(key, filter = dateFilter) {
     setActive(key);
     setLoading(true);
+
     // 1. Immediate local-first read from IndexedDB reports cache
     try {
       const cached = await getReportOffline(key);
       if (cached && Array.isArray(cached) && cached.length > 0) {
         setRows(cached);
         setLoading(false);
+      } else {
+        const fallback = await computeOfflineReport(key);
+        if (fallback && fallback.length > 0) {
+          setRows(fallback);
+          setLoading(false);
+        }
       }
     } catch {
       // ignore
     }
 
-    // 2. Server revalidation
-    try {
-      const report = REPORTS.find((r) => r.key === key);
-      const params = report?.dateBased ? filter : undefined;
-      const res = await reportApi[key](params);
-      if (res.data?.data) {
-        setRows(res.data.data);
-        await setReportOffline(key, res.data.data);
+    // 2. Server revalidation when online
+    if (navigator.onLine) {
+      try {
+        const report = REPORTS.find((r) => r.key === key);
+        const params = report?.dateBased ? filter : undefined;
+        const res = await reportApi[key](params);
+        if (res.data?.data) {
+          setRows(res.data.data);
+          await setReportOffline(key, res.data.data);
+        }
+      } catch (err) {
+        // Retain existing local rows if offline or error
+      } finally {
+        setLoading(false);
       }
-    } catch (err) {
-      if (navigator.onLine) {
-        toast.error('Failed to load report from server.');
-      }
-    } finally {
+    } else {
       setLoading(false);
     }
   }
