@@ -204,7 +204,19 @@ async function getProfitLossSummary() {
 
 async function getDashboardSummary() {
   const investorService = require('./investorService');
-  const [business, financial, collection, installments, profitLoss, investorOverview, topInvestors] = await Promise.all([
+  const [
+    business,
+    financial,
+    collection,
+    installments,
+    profitLoss,
+    investorOverview,
+    topInvestors,
+    topOutstanding,
+    overdueCustomers,
+    recentPayments,
+    recentCustomers,
+  ] = await Promise.all([
     getBusinessOverview(),
     getFinancialOverview(),
     getCollectionOverview(),
@@ -212,12 +224,28 @@ async function getDashboardSummary() {
     getProfitLossSummary(),
     investorService.getInvestorDashboardOverview(),
     investorService.getTopInvestors(5),
+    getTopOutstandingCustomers(10),
+    getOverdueCustomers(20),
+    getRecentPayments(10),
+    getRecentCustomers(10),
   ]);
 
   // investorOverview/topInvestors are kept as a SEPARATE section — investor capital
   // is never folded into `financial` (sales/profit), per the accounting requirement
   // that business money and investor money must not be mixed.
-  return { business, financial, collection, installments, profitLoss, investorOverview, topInvestors };
+  return {
+    business,
+    financial,
+    collection,
+    installments,
+    profitLoss,
+    investorOverview,
+    topInvestors,
+    topOutstanding,
+    overdueCustomers,
+    recentPayments,
+    recentCustomers,
+  };
 }
 
 module.exports = {

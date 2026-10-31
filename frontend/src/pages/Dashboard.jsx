@@ -95,18 +95,28 @@ export default function Dashboard() {
   if (error && !data) return <div className="p-8 text-center text-red-500">{error}</div>;
   if (!data) return null;
 
-  const { business, financial, collection, installments, profitLoss, investorOverview, topInvestors, topOutstanding, overdueCustomers, recentPayments, recentCustomers } = data;
+  const business = data.business || {};
+  const financial = data.financial || {};
+  const collection = data.collection || {};
+  const installments = data.installments || {};
+  const profitLoss = data.profitLoss || {};
+  const investorOverview = data.investorOverview || {};
+  const topInvestors = Array.isArray(data.topInvestors) ? data.topInvestors : [];
+  const topOutstanding = Array.isArray(data.topOutstanding) ? data.topOutstanding : [];
+  const overdueCustomers = Array.isArray(data.overdueCustomers) ? data.overdueCustomers : [];
+  const recentPayments = Array.isArray(data.recentPayments) ? data.recentPayments : [];
+  const recentCustomers = Array.isArray(data.recentCustomers) ? data.recentCustomers : [];
 
   const pieData = [
-    { name: 'Profit', value: profitLoss.totalProfit, color: '#16a34a' },
-    { name: 'Loss', value: profitLoss.totalLoss, color: '#dc2626' },
+    { name: 'Profit', value: profitLoss.totalProfit || 0, color: '#16a34a' },
+    { name: 'Loss', value: profitLoss.totalLoss || 0, color: '#dc2626' },
   ];
 
   const collectionData = [
-    { name: 'Today', value: collection.today },
-    { name: 'This Week', value: collection.thisWeek },
-    { name: 'This Month', value: collection.thisMonth },
-    { name: 'This Year', value: collection.thisYear },
+    { name: 'Today', value: collection.today || 0 },
+    { name: 'This Week', value: collection.thisWeek || 0 },
+    { name: 'This Month', value: collection.thisMonth || 0 },
+    { name: 'This Year', value: collection.thisYear || 0 },
   ];
 
   return (
@@ -188,10 +198,10 @@ export default function Dashboard() {
             separate from investor capital and from overall business sales/profit above.
           </p>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <StatCard label="Total Owner Profit" value={formatCurrency(ownerProfit.totalOwnerProfit)} tone="good" />
-            <StatCard label="Owner Profit Withdrawn" value={formatCurrency(ownerProfit.totalOwnerWithdrawn)} tone="warn" />
-            <StatCard label="Owner Profit Remaining" value={formatCurrency(ownerProfit.totalOwnerRemaining)} tone="good" />
-            <StatCard label="Investors Contributing" value={ownerProfit.perInvestor.length} />
+            <StatCard label="Total Owner Profit" value={formatCurrency(ownerProfit.totalOwnerProfit || 0)} tone="good" />
+            <StatCard label="Owner Profit Withdrawn" value={formatCurrency(ownerProfit.totalOwnerWithdrawn || 0)} tone="warn" />
+            <StatCard label="Owner Profit Remaining" value={formatCurrency(ownerProfit.totalOwnerRemaining || 0)} tone="good" />
+            <StatCard label="Investors Contributing" value={Array.isArray(ownerProfit.perInvestor) ? ownerProfit.perInvestor.length : (ownerProfit.investorsContributing || 0)} />
           </div>
         </section>
       )}
@@ -222,19 +232,19 @@ export default function Dashboard() {
           <div className="card mt-4">
             <h3 className="text-sm font-semibold text-gray-500 mb-3">TOP INVESTORS</h3>
             <div className="space-y-2">
-              {topInvestors.map((row) => (
+              {topInvestors.map((row, idx) => (
                 <Link
-                  to={`/investors/${row.investor._id}`}
-                  key={row.investor._id}
+                  to={`/investors/${row.investor?._id}`}
+                  key={row.investor?._id || idx}
                   className="flex items-center justify-between text-sm py-2 border-b border-gray-100 dark:border-gray-800 last:border-0 hover:opacity-80"
                 >
                   <div>
-                    <p className="font-medium">{row.investor.name}</p>
+                    <p className="font-medium">{row.investor?.name || 'Investor'}</p>
                     <p className="text-gray-500 text-xs">
-                      Deployed: {formatCurrency(row.capitalDeployed)} · Available: {formatCurrency(row.capitalAvailable)}
+                      Deployed: {formatCurrency(row.capitalDeployed || 0)} · Available: {formatCurrency(row.capitalAvailable || 0)}
                     </p>
                   </div>
-                  <span className="font-semibold">{formatCurrency(row.totalInvested)}</span>
+                  <span className="font-semibold">{formatCurrency(row.totalInvested || 0)}</span>
                 </Link>
               ))}
             </div>
@@ -268,7 +278,7 @@ export default function Dashboard() {
             </PieChart>
           </ResponsiveContainer>
           <p className="text-xs text-gray-500 mt-2">
-            {profitLoss.profitableContracts} profitable · {profitLoss.lossContracts} loss-making · {profitLoss.breakEvenContracts} break-even
+            {profitLoss.profitableContracts || 0} profitable · {profitLoss.lossContracts || 0} loss-making · {profitLoss.breakEvenContracts || 0} break-even
           </p>
         </div>
       </section>
@@ -280,17 +290,17 @@ export default function Dashboard() {
           </div>
           <div className="space-y-2">
             {topOutstanding.length === 0 && <p className="text-sm text-gray-400">No outstanding balances.</p>}
-            {topOutstanding.map((row) => (
+            {topOutstanding.map((row, idx) => (
               <Link
                 to={`/customers/${row.customer?._id}`}
-                key={row.planId}
+                key={row.planId || idx}
                 className="flex items-center justify-between text-sm py-2 border-b border-gray-100 dark:border-gray-800 last:border-0 hover:opacity-80"
               >
                 <div>
-                  <p className="font-medium">{row.customer?.name}</p>
-                  <p className="text-gray-500 text-xs">{row.customer?.contactNumber}</p>
+                  <p className="font-medium">{row.customer?.name || 'Customer'}</p>
+                  <p className="text-gray-500 text-xs">{row.customer?.contactNumber || '-'}</p>
                 </div>
-                <span className="font-semibold text-orange-600">{formatCurrency(row.remaining)}</span>
+                <span className="font-semibold text-orange-600">{formatCurrency(row.remaining || 0)}</span>
               </Link>
             ))}
           </div>
@@ -310,10 +320,10 @@ export default function Dashboard() {
                 className="flex items-center justify-between text-sm py-2 border-b border-gray-100 dark:border-gray-800 last:border-0 hover:opacity-80"
               >
                 <div>
-                  <p className="font-medium">{row.customer?.name}</p>
-                  <p className="text-gray-500 text-xs">Installment #{row.installmentNumber} · {row.daysOverdue}d overdue</p>
+                  <p className="font-medium">{row.customer?.name || 'Customer'}</p>
+                  <p className="text-gray-500 text-xs">Installment #{row.installmentNumber} · {row.daysOverdue || 0}d overdue</p>
                 </div>
-                <span className="font-semibold text-red-600">{formatCurrency(row.remaining)}</span>
+                <span className="font-semibold text-red-600">{formatCurrency(row.remaining || 0)}</span>
               </Link>
             ))}
           </div>
@@ -325,13 +335,13 @@ export default function Dashboard() {
           <h2 className="text-sm font-semibold text-gray-500 mb-3">RECENT PAYMENTS</h2>
           <div className="space-y-2">
             {recentPayments.length === 0 && <p className="text-sm text-gray-400">No payments yet.</p>}
-            {recentPayments.map((p) => (
-              <div key={p._id} className="flex items-center justify-between text-sm py-2 border-b border-gray-100 dark:border-gray-800 last:border-0">
+            {recentPayments.map((p, idx) => (
+              <div key={p._id || idx} className="flex items-center justify-between text-sm py-2 border-b border-gray-100 dark:border-gray-800 last:border-0">
                 <div>
-                  <p className="font-medium">{p.customerId?.name}</p>
+                  <p className="font-medium">{p.customerId?.name || 'Customer'}</p>
                   <p className="text-gray-500 text-xs">{formatDate(p.paymentDate)}</p>
                 </div>
-                <span className="font-semibold text-green-600">{formatCurrency(p.amount)}</span>
+                <span className="font-semibold text-green-600">{formatCurrency(p.amount || 0)}</span>
               </div>
             ))}
           </div>
@@ -341,15 +351,15 @@ export default function Dashboard() {
           <h2 className="text-sm font-semibold text-gray-500 mb-3">RECENTLY ADDED CUSTOMERS</h2>
           <div className="space-y-2">
             {recentCustomers.length === 0 && <p className="text-sm text-gray-400">No customers yet.</p>}
-            {recentCustomers.map((c) => (
+            {recentCustomers.map((c, idx) => (
               <Link
                 to={`/customers/${c._id}`}
-                key={c._id}
+                key={c._id || idx}
                 className="flex items-center justify-between text-sm py-2 border-b border-gray-100 dark:border-gray-800 last:border-0 hover:opacity-80"
               >
                 <div>
-                  <p className="font-medium">{c.name}</p>
-                  <p className="text-gray-500 text-xs">{c.contactNumber}</p>
+                  <p className="font-medium">{c.name || 'Customer'}</p>
+                  <p className="text-gray-500 text-xs">{c.contactNumber || '-'}</p>
                 </div>
                 <span className="text-gray-400 text-xs">{formatDate(c.createdAt)}</span>
               </Link>
