@@ -33,5 +33,9 @@ Thumbs.db
 # Test / coverage
 coverage/
 
+# Backups
+backend/backups/
+backups/
+
 # Misc
 *.zip

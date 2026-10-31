@@ -29,6 +29,21 @@ let syncState = {
   lastError: null,
 };
 
+let retryTimeout = null;
+let retryDelay = 5000;
+
+function scheduleRetry() {
+  if (retryTimeout) clearTimeout(retryTimeout);
+  if (typeof navigator !== 'undefined' && !navigator.onLine) return;
+
+  retryTimeout = setTimeout(() => {
+    if (typeof navigator !== 'undefined' && navigator.onLine && syncState.pendingCount > 0 && !syncState.isSyncing) {
+      triggerSync();
+    }
+  }, retryDelay);
+  retryDelay = Math.min(Math.round(retryDelay * 1.5), 60000);
+}
+
 function notifyListeners() {
   listeners.forEach((fn) => {
     try {
@@ -76,6 +91,7 @@ export async function initSyncManager() {
   // Online / offline window listeners
   window.addEventListener('online', () => {
     syncState = { ...syncState, isOnline: true };
+    retryDelay = 5000;
     notifyListeners();
     triggerSync();
   });
@@ -133,12 +149,17 @@ export async function triggerSync() {
       lastError: null,
     };
     await setMetadata('lastSyncTime', now);
+    retryDelay = 5000;
+    if (retryTimeout) clearTimeout(retryTimeout);
   } catch (err) {
     syncState = {
       ...syncState,
       isSyncing: false,
       lastError: err.message || 'Synchronization failed',
     };
+    if (typeof navigator !== 'undefined' && navigator.onLine && syncState.pendingCount > 0) {
+      scheduleRetry();
+    }
   } finally {
     await refreshPendingCount();
     notifyListeners();
