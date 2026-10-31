@@ -34,7 +34,14 @@ export function SyncProvider({ children }) {
 
   useEffect(() => {
     initSyncManager();
+    if (typeof window !== 'undefined') {
+      window.__ims_triggerSync = triggerSync;
+      window.__ims_syncState = syncState;
+    }
     const unsubscribe = subscribeSyncState((state) => {
+      if (typeof window !== 'undefined') {
+        window.__ims_syncState = state;
+      }
       setSyncState({ ...state });
     });
     return unsubscribe;

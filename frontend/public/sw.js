@@ -154,12 +154,18 @@ self.addEventListener('fetch', (event) => {
         }
 
         // Fetch from network and cache
-        return fetch(request).then((networkResponse) => {
-          if (networkResponse && networkResponse.status === 200) {
-            safeCachePut(CACHE_NAME, request, networkResponse);
-          }
-          return networkResponse;
-        });
+        return fetch(request)
+          .then((networkResponse) => {
+            if (networkResponse && networkResponse.status === 200) {
+              safeCachePut(CACHE_NAME, request, networkResponse);
+            }
+            return networkResponse;
+          })
+          .catch(async () => {
+            const cached = await caches.match(request);
+            if (cached) return cached;
+            return new Response('', { status: 408, statusText: 'Request timed out or offline' });
+          });
       })
     );
     return;

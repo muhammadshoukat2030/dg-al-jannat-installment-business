@@ -141,6 +141,65 @@ const bootstrapSync = asyncHandler(async (req, res) => {
 
   const serverTime = new Date().toISOString();
 
+  // Fast manifest endpoint returning server counts & metadata without heavy record payloads
+  if (module === 'manifest' || module === 'meta') {
+    const [
+      totalCustomers,
+      totalPlans,
+      totalInstallments,
+      totalPayments,
+      totalInvestors,
+      totalInvestorTransactions,
+      totalWithdrawals,
+      totalOwnerTransactions,
+      totalFundingAllocations,
+      settings,
+      ownerProfit,
+      ownerCapital,
+      ownerFundedSummary,
+      dashboard,
+    ] = await Promise.all([
+      Customer.countDocuments({ isDeleted: { $ne: true } }),
+      InstallmentPlan.countDocuments({ isDeleted: { $ne: true } }),
+      Installment.countDocuments({}),
+      Payment.countDocuments({}),
+      Investor.countDocuments({ isDeleted: { $ne: true } }),
+      InvestorTransaction.countDocuments({}),
+      Withdrawal.countDocuments({}),
+      OwnerTransaction.countDocuments({}),
+      FundingAllocation.countDocuments({}),
+      BusinessSetting.findOne().catch(() => null),
+      accountingService.getOwnerProfitSummary().catch(() => null),
+      accountingService.getOwnerCapitalSummary().catch(() => null),
+      ownerService.getOwnerFundedSummary().catch(() => null),
+      getDashboardSummary().catch(() => null),
+    ]);
+
+    return res.json({
+      success: true,
+      serverTime,
+      module: 'manifest',
+      counts: {
+        customers: totalCustomers,
+        plans: totalPlans,
+        installments: totalInstallments,
+        payments: totalPayments,
+        investors: totalInvestors,
+        investorTransactions: totalInvestorTransactions,
+        withdrawals: totalWithdrawals,
+        ownerTransactions: totalOwnerTransactions,
+        fundingAllocations: totalFundingAllocations,
+      },
+      settings: settings || {},
+      ownerData: {
+        profit: ownerProfit,
+        capital: ownerCapital,
+        fundedSummary: ownerFundedSummary,
+      },
+      dashboard: dashboard || {},
+    });
+  }
+
   // If client requested specific module chunk
   if (module === 'customers') {
     const [customers, total] = await Promise.all([

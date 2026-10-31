@@ -132,10 +132,137 @@ export async function retryFailedOperations() {
   return triggerSync();
 }
 
+let syncLockPromise = null;
+let isManagerInitialized = false;
+
+/**
+ * Derives and stores offline reports and dashboard summaries directly from IndexedDB records.
+ */
+async function deriveAndStoreOfflineReports() {
+  try {
+    const [plans, installments, payments, customers, investors, allocations] = await Promise.all([
+      getAll('installmentPlans'),
+      getAll('installments'),
+      getAll('payments'),
+      getAll('customers'),
+      getAll('investors'),
+      getAll('fundingAllocations'),
+    ]);
+
+    const activePlans = plans.filter((p) => !p.isDeleted);
+    const activeCustomers = customers.filter((c) => !c.isDeleted);
+
+    // 1. Daily Collections (today)
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayPayments = payments.filter((p) => (p.paymentDate || p.createdAt || '').slice(0, 10) === todayStr);
+    const todayTotal = todayPayments.reduce((sum, p) => sum + (p.amount || 0), 0);
+
+    // 2. Monthly Collections (current month)
+    const currentMonthStr = todayStr.slice(0, 7);
+    const monthPayments = payments.filter((p) => (p.paymentDate || p.createdAt || '').slice(0, 7) === currentMonthStr);
+    const monthTotal = monthPayments.reduce((sum, p) => sum + (p.amount || 0), 0);
+
+    // 3. Outstanding Plans
+    const outstandingPlans = activePlans.map((plan) => {
+      const planPayments = payments.filter((p) => String(p.planId) === String(plan._id));
+      const totalPaid = planPayments.reduce((s, p) => s + (p.amount || 0), 0);
+      const remainingBalance = plan.remainingAmount !== undefined
+        ? plan.remainingAmount
+        : Math.max(0, (plan.sellingPrice || plan.totalAmount || 0) - totalPaid);
+      return {
+        ...plan,
+        totalPaid,
+        remainingBalance,
+      };
+    }).filter((p) => p.remainingBalance > 0);
+
+    // 4. Overdue Installments
+    const todayDate = new Date();
+    todayDate.setHours(0, 0, 0, 0);
+    const overdueInstallments = installments.filter((inst) => {
+      if (inst.status === 'PAID') return false;
+      const due = new Date(inst.dueDate);
+      return due < todayDate;
+    });
+
+    // 5. Missed Installments
+    const missedInstallments = installments.filter((inst) => inst.status === 'MISSED');
+
+    // Save each report to reportsCache
+    await Promise.all([
+      setReportOffline('daily', todayPayments),
+      setReportOffline('monthly', monthPayments),
+      setReportOffline('outstanding', outstandingPlans),
+      setReportOffline('overdue', overdueInstallments),
+      setReportOffline('missed', missedInstallments),
+    ]);
+
+    // Derive cached dashboard summary if absent
+    const existingDash = await getMetadata('cachedDashboardSummary');
+    if (!existingDash || !existingDash.totalCustomers) {
+      const totalSales = activePlans.reduce((sum, p) => sum + (p.sellingPrice || p.totalAmount || 0), 0);
+      const totalReceived = payments.reduce((sum, p) => sum + (p.amount || 0), 0);
+      const totalRemaining = Math.max(0, totalSales - totalReceived);
+      const totalOutstanding = outstandingPlans.reduce((sum, p) => sum + p.remainingBalance, 0);
+
+      const derivedDashboard = {
+        totalCustomers: activeCustomers.length,
+        totalSales,
+        totalReceived,
+        totalRemaining,
+        todayCollection: todayTotal,
+        monthlyCollection: monthTotal,
+        totalOutstanding,
+        overdueCount: overdueInstallments.length,
+        recentPayments: payments.slice(0, 10),
+        recentCustomers: activeCustomers.slice(0, 10),
+        investorOverview: {
+          totalInvestors: investors.filter((i) => !i.isDeleted).length,
+          totalCapital: 0,
+        },
+      };
+      await setMetadata('cachedDashboardSummary', derivedDashboard);
+    }
+  } catch (err) {
+    console.warn('Non-fatal: could not derive offline reports during sync:', err.message);
+  }
+}
+
+function updateBootstrapProgress(manifest) {
+  if (!manifest || !manifest.datasets) return;
+  const keys = [
+    'customers',
+    'installmentPlans',
+    'installments',
+    'payments',
+    'investors',
+    'investorTransactions',
+    'withdrawals',
+    'ownerTransactions',
+    'fundingAllocations',
+  ];
+  let totalExpected = 0;
+  let totalDownloaded = 0;
+  for (const k of keys) {
+    const ds = manifest.datasets[k];
+    if (ds) {
+      totalExpected += ds.total || 0;
+      totalDownloaded += ds.count || 0;
+    }
+  }
+  if (totalExpected > 0) {
+    syncState.bootstrapPercent = Math.min(99, Math.round((totalDownloaded / totalExpected) * 100));
+    notifyListeners();
+  }
+}
+
 /**
  * Initializes listeners, persistent storage, and checks initial sync status.
  */
 export async function initSyncManager() {
+  if (isManagerInitialized) return;
+  isManagerInitialized = true;
+
   await requestStoragePersistence();
 
   // Load last sync time from metadata
@@ -159,7 +286,7 @@ export async function initSyncManager() {
     notifyListeners();
   });
 
-  // If online on app launch, trigger sync
+  // If online on app launch, trigger sync safely
   if (navigator.onLine) {
     setTimeout(() => {
       triggerSync();
@@ -168,12 +295,11 @@ export async function initSyncManager() {
 }
 
 /**
- * Main synchronization routine:
- * 1. Flushes pending offline mutations (push)
- * 2. Fetches latest server updates (delta or bootstrap)
+ * Main synchronization routine with shared synchronization lock.
+ * Repeated calls or concurrent triggers await the active job without duplicating or aborting it.
  */
 export async function triggerSync() {
-  if (syncState.isSyncing) return;
+  if (syncLockPromise) return syncLockPromise;
   if (!navigator.onLine) {
     await refreshPendingCount();
     return;
@@ -183,46 +309,51 @@ export async function triggerSync() {
   const token = localStorage.getItem('ims_token') || localStorage.getItem('token');
   if (!token) return;
 
-  syncState = { ...syncState, isSyncing: true, lastError: null };
-  notifyListeners();
-
-  try {
-    // Step 1: Push offline operations
-    await pushOfflineOperations();
-
-    // Step 2: Pull updates
-    const initialCompleted = await getMetadata('initialSyncCompleted');
-    if (!initialCompleted) {
-      await performBootstrapSync();
-    } else {
-      await performDeltaSync();
-    }
-
-    const now = new Date().toISOString();
-    syncState = {
-      ...syncState,
-      isSyncing: false,
-      lastSyncTime: now,
-      lastError: null,
-      currentStep: '',
-    };
-    await setMetadata('lastSyncTime', now);
-    retryDelay = 5000;
-    if (retryTimeout) clearTimeout(retryTimeout);
-  } catch (err) {
-    syncState = {
-      ...syncState,
-      isSyncing: false,
-      lastError: err.message || 'Synchronization failed',
-      currentStep: '',
-    };
-    if (typeof navigator !== 'undefined' && navigator.onLine && syncState.pendingCount > 0) {
-      scheduleRetry();
-    }
-  } finally {
-    await refreshPendingCount();
+  syncLockPromise = (async () => {
+    syncState = { ...syncState, isSyncing: true, lastError: null };
     notifyListeners();
-  }
+
+    try {
+      // Step 1: Push offline operations
+      await pushOfflineOperations();
+
+      // Step 2: Pull updates
+      const initialCompleted = await getMetadata('initialSyncCompleted');
+      if (!initialCompleted) {
+        await performBootstrapSync();
+      } else {
+        await performDeltaSync();
+      }
+
+      const now = new Date().toISOString();
+      syncState = {
+        ...syncState,
+        isSyncing: false,
+        lastSyncTime: now,
+        lastError: null,
+        currentStep: '',
+      };
+      await setMetadata('lastSyncTime', now);
+      retryDelay = 5000;
+      if (retryTimeout) clearTimeout(retryTimeout);
+    } catch (err) {
+      syncState = {
+        ...syncState,
+        isSyncing: false,
+        lastError: err.message || 'Synchronization failed',
+        currentStep: '',
+      };
+      if (typeof navigator !== 'undefined' && navigator.onLine && syncState.pendingCount > 0) {
+        scheduleRetry();
+      }
+    } finally {
+      await refreshPendingCount();
+      notifyListeners();
+      syncLockPromise = null;
+    }
+  })();
+
+  return syncLockPromise;
 }
 
 /**
@@ -241,6 +372,7 @@ async function fetchAllModulePages(moduleName, storeName, manifest, manifestKey)
 
     const res = await client.get('/sync/bootstrap', {
       params: { module: moduleName, offset, limit },
+      timeout: 30000,
     });
 
     if (res.data?.success && Array.isArray(res.data?.data)) {
@@ -252,14 +384,13 @@ async function fetchAllModulePages(moduleName, storeName, manifest, manifestKey)
       dataset.count = offset;
       dataset.total = res.data.total !== undefined ? res.data.total : offset;
       hasMore = res.data.hasMore === true && res.data.data.length > 0;
-      if (!hasMore) {
-        dataset.status = 'COMPLETED';
-      } else {
-        dataset.status = 'IN_PROGRESS';
-      }
+      dataset.status = hasMore ? 'IN_PROGRESS' : 'COMPLETED';
+
       manifest.datasets[manifestKey] = dataset;
       manifest.updatedAt = new Date().toISOString();
       await setBootstrapManifest(manifest);
+
+      updateBootstrapProgress(manifest);
     } else {
       dataset.status = 'FAILED';
       dataset.error = `Failed to download ${moduleName} at offset ${offset}`;
@@ -279,7 +410,7 @@ async function performBootstrapSync() {
   let manifest = await getBootstrapManifest();
   if (!manifest) {
     manifest = {
-      version: 1,
+      version: 2,
       status: 'IN_PROGRESS',
       datasets: {
         customers: { count: 0, total: 0, cursor: 0, status: 'PENDING' },
@@ -301,140 +432,59 @@ async function performBootstrapSync() {
     await setBootstrapManifest(manifest);
   }
 
-  // 1. Initial base package download if not completed
-  const baseIncomplete =
-    manifest.datasets.settings?.status !== 'COMPLETED' ||
-    manifest.datasets.ownerData?.status !== 'COMPLETED' ||
-    manifest.datasets.dashboard?.status !== 'COMPLETED' ||
-    manifest.datasets.reports?.status !== 'COMPLETED';
+  // 1. Initial lightweight manifest fetch
+  syncState.currentStep = 'Fetching database manifest & counts...';
+  notifyListeners();
 
-  let initialData = null;
-  let counts = {};
-
-  if (baseIncomplete) {
-    syncState.currentStep = 'Downloading core business datasets...';
-    notifyListeners();
-
-    const res = await client.get('/sync/bootstrap');
-    if (!res.data?.success || !res.data?.data) {
-      throw new Error('Bootstrap sync response was unsuccessful or empty.');
+  let manifestData = null;
+  try {
+    const metaRes = await client.get('/sync/bootstrap', {
+      params: { module: 'manifest' },
+      timeout: 25000,
+    });
+    if (metaRes.data?.success && metaRes.data?.counts) {
+      manifestData = metaRes.data;
     }
-    initialData = res.data.data;
-    counts = res.data.counts || {};
+  } catch (err) {
+    console.warn('Manifest endpoint call failed, using fallback:', err.message);
+  }
 
-    const {
-      customers = [],
-      plans = [],
-      installments = [],
-      payments = [],
-      investors = [],
-      investorTransactions = [],
-      withdrawals = [],
-      ownerTransactions = [],
-      fundingAllocations = [],
-      settings,
-      ownerData,
-      dashboard,
-      investorSummaries,
-      reports,
-    } = initialData;
+  if (manifestData) {
+    const counts = manifestData.counts || {};
+    if (manifestData.settings) await setMetadata('businessSettings', manifestData.settings);
+    if (manifestData.ownerData) await setMetadata('ownerData', manifestData.ownerData);
+    if (manifestData.dashboard) await setMetadata('cachedDashboardSummary', manifestData.dashboard);
 
-    // Atomically store base batch
-    await Promise.all([
-      putMany('customers', customers),
-      putMany('installmentPlans', plans),
-      putMany('installments', installments),
-      putMany('payments', payments),
-      putMany('investors', investors),
-      putMany('investorTransactions', investorTransactions),
-      putMany('withdrawals', withdrawals),
-      putMany('ownerTransactions', ownerTransactions),
-      putMany('fundingAllocations', fundingAllocations),
-    ]);
+    manifest.datasets.settings = { status: 'COMPLETED' };
+    manifest.datasets.ownerData = { status: 'COMPLETED' };
+    manifest.datasets.dashboard = { status: 'COMPLETED' };
 
-    if (settings) {
-      await setMetadata('businessSettings', settings);
-      manifest.datasets.settings = { status: 'COMPLETED' };
-    }
-    if (ownerData) {
-      await setMetadata('ownerData', ownerData);
-      manifest.datasets.ownerData = { status: 'COMPLETED' };
-    }
-    if (investorSummaries) {
-      await setMetadata('cachedInvestorSummaries', investorSummaries);
-    }
-    if (reports) {
-      for (const [key, rows] of Object.entries(reports)) {
-        await setReportOffline(key, rows);
+    const keyMapping = {
+      customers: 'customers',
+      plans: 'installmentPlans',
+      installments: 'installments',
+      payments: 'payments',
+      investors: 'investors',
+      investorTransactions: 'investorTransactions',
+      withdrawals: 'withdrawals',
+      ownerTransactions: 'ownerTransactions',
+      fundingAllocations: 'fundingAllocations',
+    };
+
+    for (const [backendKey, manifestKey] of Object.entries(keyMapping)) {
+      const total = counts[backendKey] !== undefined ? counts[backendKey] : 0;
+      if (!manifest.datasets[manifestKey]) {
+        manifest.datasets[manifestKey] = { count: 0, total, cursor: 0, status: total === 0 ? 'COMPLETED' : 'PENDING' };
+      } else {
+        manifest.datasets[manifestKey].total = total;
+        if (total === 0 || manifest.datasets[manifestKey].count >= total) {
+          manifest.datasets[manifestKey].status = 'COMPLETED';
+        }
       }
-      manifest.datasets.reports = { status: 'COMPLETED' };
     }
-    if (dashboard) {
-      await setMetadata('cachedDashboardSummary', dashboard);
-      if (dashboard.investorOverview) {
-        await setMetadata('cachedInvestorOverview', dashboard.investorOverview);
-      }
-      manifest.datasets.dashboard = { status: 'COMPLETED' };
-    }
-
-    // Set initial cursors based on base payload
-    manifest.datasets.customers = {
-      count: customers.length,
-      total: counts.customers || customers.length,
-      cursor: customers.length,
-      status: customers.length >= (counts.customers || 0) ? 'COMPLETED' : 'IN_PROGRESS',
-    };
-    manifest.datasets.installmentPlans = {
-      count: plans.length,
-      total: counts.plans || plans.length,
-      cursor: plans.length,
-      status: plans.length >= (counts.plans || 0) ? 'COMPLETED' : 'IN_PROGRESS',
-    };
-    manifest.datasets.installments = {
-      count: installments.length,
-      total: counts.installments || installments.length,
-      cursor: installments.length,
-      status: installments.length >= (counts.installments || 0) ? 'COMPLETED' : 'IN_PROGRESS',
-    };
-    manifest.datasets.payments = {
-      count: payments.length,
-      total: counts.payments || payments.length,
-      cursor: payments.length,
-      status: payments.length >= (counts.payments || 0) ? 'COMPLETED' : 'IN_PROGRESS',
-    };
-    manifest.datasets.investors = {
-      count: investors.length,
-      total: counts.investors || investors.length,
-      cursor: investors.length,
-      status: investors.length >= (counts.investors || 0) ? 'COMPLETED' : 'IN_PROGRESS',
-    };
-    manifest.datasets.investorTransactions = {
-      count: investorTransactions.length,
-      total: counts.investorTransactions || investorTransactions.length,
-      cursor: investorTransactions.length,
-      status: investorTransactions.length >= (counts.investorTransactions || 0) ? 'COMPLETED' : 'IN_PROGRESS',
-    };
-    manifest.datasets.withdrawals = {
-      count: withdrawals.length,
-      total: counts.withdrawals || withdrawals.length,
-      cursor: withdrawals.length,
-      status: withdrawals.length >= (counts.withdrawals || 0) ? 'COMPLETED' : 'IN_PROGRESS',
-    };
-    manifest.datasets.ownerTransactions = {
-      count: ownerTransactions.length,
-      total: counts.ownerTransactions || ownerTransactions.length,
-      cursor: ownerTransactions.length,
-      status: ownerTransactions.length >= (counts.ownerTransactions || 0) ? 'COMPLETED' : 'IN_PROGRESS',
-    };
-    manifest.datasets.fundingAllocations = {
-      count: fundingAllocations.length,
-      total: counts.fundingAllocations || fundingAllocations.length,
-      cursor: fundingAllocations.length,
-      status: fundingAllocations.length >= (counts.fundingAllocations || 0) ? 'COMPLETED' : 'IN_PROGRESS',
-    };
-
     manifest.updatedAt = new Date().toISOString();
     await setBootstrapManifest(manifest);
+    updateBootstrapProgress(manifest);
   }
 
   // 2. Paginate remaining pages for any incomplete dataset
@@ -456,7 +506,13 @@ async function performBootstrapSync() {
     }
   }
 
-  // 3. Strict verification: All datasets must be confirmed COMPLETED
+  // 3. Derive offline reports directly from verified IndexedDB tables
+  syncState.currentStep = 'Generating offline reports & analytics...';
+  notifyListeners();
+  await deriveAndStoreOfflineReports();
+  manifest.datasets.reports = { status: 'COMPLETED' };
+
+  // 4. Strict verification: All datasets must be confirmed COMPLETED
   const allComplete = Object.values(manifest.datasets).every((ds) => ds.status === 'COMPLETED');
   if (!allComplete) {
     manifest.status = 'IN_PROGRESS';
@@ -468,6 +524,11 @@ async function performBootstrapSync() {
   manifest.completedAt = new Date().toISOString();
   await setBootstrapManifest(manifest);
   await setMetadata('initialSyncCompleted', true);
+  const now = new Date().toISOString();
+  await setMetadata('lastSyncTime', now);
+  syncState.bootstrapStatus = 'COMPLETED';
+  syncState.bootstrapPercent = 100;
+  syncState.lastSyncTime = now;
   syncState.currentStep = '';
   notifyListeners();
 }
