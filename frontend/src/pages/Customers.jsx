@@ -1,41 +1,63 @@
-import { useEffect, useState } from 'react';
+import { useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { Search, PlusCircle, FileSpreadsheet, Trash2 } from 'lucide-react';
+import { Search, PlusCircle, FileSpreadsheet, Trash2, WifiOff, Loader2 } from 'lucide-react';
 import { customerApi, exportApi } from '../api/services';
 import { formatDate } from '../utils/format';
 import DeleteCustomerModal from '../components/customers/DeleteCustomerModal';
+import { useSmartScroll } from '../hooks/useSmartScroll';
+import { queryCustomersOffline } from '../offline/db';
 
 export default function Customers() {
-  const [customers, setCustomers] = useState([]);
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('active');
-  const [loading, setLoading] = useState(true);
-  const [page, setPage] = useState(1);
-  const [pages, setPages] = useState(1);
   const [deleteTarget, setDeleteTarget] = useState(null);
 
-  function refresh() {
-    setLoading(true);
-    customerApi
-      .list({ search, status, page, limit: 15 })
-      .then((res) => {
-        setCustomers(res.data.data);
-        setPages(res.data.pages || 1);
-      })
-      .finally(() => setLoading(false));
-  }
+  const fetchOnline = useCallback(
+    (params) => customerApi.list(params).then((res) => res.data),
+    []
+  );
 
-  useEffect(() => {
-    const timer = setTimeout(refresh, 300);
-    return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, status, page]);
+  const fetchOffline = useCallback(
+    (params) => queryCustomersOffline(params),
+    []
+  );
+
+  const {
+    items: customers,
+    loading,
+    loadingMore,
+    hasMore,
+    total,
+    refresh,
+    sentinelRef,
+    isOfflineData,
+  } = useSmartScroll({
+    fetchOnline,
+    fetchOffline,
+    filters: { search, status },
+    limit: 15,
+  });
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <h1 className="text-xl font-bold">Customers</h1>
+        <div>
+          <h1 className="text-xl font-bold flex items-center gap-2">
+            Customers
+            {isOfflineData && (
+              <span className="badge bg-amber-500/10 text-amber-600 text-[11px] font-normal flex items-center gap-1">
+                <WifiOff className="w-3 h-3" /> Offline Cache
+              </span>
+            )}
+          </h1>
+          {total > 0 && (
+            <p className="text-xs text-theme-muted mt-0.5">
+              Showing {customers.length} of {total} total customers
+            </p>
+          )}
+        </div>
+
         <div className="flex gap-2 flex-wrap">
           <button
             className="btn-secondary"
@@ -56,19 +78,13 @@ export default function Customers() {
             className="input pl-9"
             placeholder="Search by name, phone, CNIC, ID..."
             value={search}
-            onChange={(e) => {
-              setPage(1);
-              setSearch(e.target.value);
-            }}
+            onChange={(e) => setSearch(e.target.value)}
           />
         </div>
         <select
           className="input w-auto"
           value={status}
-          onChange={(e) => {
-            setPage(1);
-            setStatus(e.target.value);
-          }}
+          onChange={(e) => setStatus(e.target.value)}
         >
           <option value="active">Active</option>
           <option value="archived">Archived</option>
@@ -94,7 +110,7 @@ export default function Customers() {
             {loading && (
               <tr>
                 <td colSpan={7} className="px-4 py-6 text-center text-gray-400">
-                  Loading...
+                  Loading customers...
                 </td>
               </tr>
             )}
@@ -107,23 +123,31 @@ export default function Customers() {
             )}
             {!loading &&
               customers.map((c) => (
-                <tr key={c._id} className="border-t border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/50">
-                  <td className="px-4 py-2">
-                    <Link to={`/customers/${c._id}`} className="text-primary-600 font-medium">
-                      {c.customerId}
+                <tr key={c._id || c.operationId} className="border-t border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                  <td className="px-4 py-2 font-mono text-xs text-gray-500">
+                    {c.customerId}
+                    {c.isPendingSync && (
+                      <span className="ml-1.5 badge bg-amber-500/10 text-amber-600 dark:text-amber-400 text-[10px]">
+                        Sync Pending
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2 font-medium">
+                    <Link to={`/customers/${c._id}`} className="text-primary-600 hover:underline">
+                      {c.name}
                     </Link>
                   </td>
-                  <td className="px-4 py-2">{c.name}</td>
                   <td className="px-4 py-2">{c.contactNumber}</td>
-                  <td className="px-4 py-2 hidden lg:table-cell text-gray-500">{c.cnic || '-'}</td>
-                  <td className="px-4 py-2">{c.city || '-'}</td>
-                  <td className="px-4 py-2 text-gray-500">{formatDate(c.createdAt)}</td>
+                  <td className="px-4 py-2 hidden lg:table-cell">{c.cnic || '—'}</td>
+                  <td className="px-4 py-2">{c.city || '—'}</td>
+                  <td className="px-4 py-2 text-xs text-gray-500">{formatDate(c.createdAt)}</td>
                   <td className="px-4 py-2 no-print">
                     <button
-                      className="text-red-600 text-xs font-medium hover:underline inline-flex items-center gap-1"
+                      className="text-red-600 hover:text-red-700 p-1"
                       onClick={() => setDeleteTarget(c)}
+                      aria-label={`Delete ${c.name}`}
                     >
-                      <Trash2 className="w-3.5 h-3.5" /> Delete
+                      <Trash2 className="w-4 h-4" />
                     </button>
                   </td>
                 </tr>
@@ -134,13 +158,20 @@ export default function Customers() {
 
       {/* Mobile card list */}
       <div className="space-y-3 sm:hidden">
-        {loading && <p className="text-center text-gray-400 py-6">Loading...</p>}
+        {loading && <p className="text-center text-gray-400 py-6">Loading customers...</p>}
         {!loading && customers.length === 0 && <p className="text-center text-gray-400 py-6">No customers found.</p>}
         {!loading &&
           customers.map((c) => (
-            <div key={c._id} className="card flex items-center justify-between gap-3">
+            <div key={c._id || c.operationId} className="card flex items-center justify-between gap-3">
               <Link to={`/customers/${c._id}`} className="min-w-0">
-                <p className="font-medium text-primary-600 truncate">{c.name}</p>
+                <p className="font-medium text-primary-600 truncate flex items-center gap-1.5">
+                  {c.name}
+                  {c.isPendingSync && (
+                    <span className="badge bg-amber-500/10 text-amber-600 text-[10px]">
+                      Pending
+                    </span>
+                  )}
+                </p>
                 <p className="text-xs text-gray-500">{c.customerId} · {c.contactNumber}</p>
                 {c.cnic && <p className="text-xs text-gray-400">CNIC: {c.cnic}</p>}
                 {c.city && <p className="text-xs text-gray-400">{c.city}</p>}
@@ -152,19 +183,18 @@ export default function Customers() {
           ))}
       </div>
 
-      {pages > 1 && (
-        <div className="flex justify-center gap-2 flex-wrap">
-          {Array.from({ length: pages }, (_, i) => i + 1).map((p) => (
-            <button
-              key={p}
-              onClick={() => setPage(p)}
-              className={`w-8 h-8 rounded-lg text-sm ${p === page ? 'bg-primary-600 text-white' : 'btn-secondary'}`}
-            >
-              {p}
-            </button>
-          ))}
-        </div>
-      )}
+      {/* Infinite Scroll Sentinel / Loading More Indicator */}
+      <div ref={sentinelRef} className="py-2 text-center text-xs text-theme-muted">
+        {loadingMore && (
+          <div className="flex items-center justify-center gap-2 py-3">
+            <Loader2 className="w-4 h-4 animate-spin text-primary-600" />
+            <span>Loading additional records...</span>
+          </div>
+        )}
+        {!hasMore && customers.length > 0 && !loading && (
+          <p className="py-2 text-gray-400">All {total} customers loaded</p>
+        )}
+      </div>
 
       {deleteTarget && (
         <DeleteCustomerModal

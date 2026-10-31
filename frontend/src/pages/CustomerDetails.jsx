@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { Printer, Edit, Archive, Trash2, FileDown } from 'lucide-react';
+import { Printer, Edit, Archive, Trash2, FileDown, WifiOff } from 'lucide-react';
 import { customerApi, planApi, exportApi } from '../api/services';
 import { formatCurrency, formatDate } from '../utils/format';
 import StatusBadge from '../components/common/StatusBadge';
@@ -12,6 +12,7 @@ import ShareMenu from '../components/common/ShareMenu';
 import DateFilterBar from '../components/common/DateFilterBar';
 import FundingAllocationEditor from '../components/investors/FundingAllocationEditor';
 import { DURATION_OPTIONS } from '../utils/durationOptions';
+import { get, getAll } from '../offline/db';
 
 const TABS = ['Overview', 'Installments', 'Payments', 'Missed', 'Profit/Loss'];
 
@@ -32,17 +33,55 @@ export default function CustomerDetails() {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [loading, setLoading] = useState(true);
   const [scheduleDateFilter, setScheduleDateFilter] = useState({ preset: 'all' });
+  const [isOfflineMode, setIsOfflineMode] = useState(false);
+
+  const loadOfflineSchedule = useCallback(async (pid) => {
+    try {
+      const all = await getAll('installments');
+      const filtered = all
+        .filter((i) => i.planId === pid || i.planId?._id === pid)
+        .sort((a, b) => (a.installmentNumber || 0) - (b.installmentNumber || 0));
+      setSchedule(filtered);
+    } catch {
+      // Ignored
+    }
+  }, []);
 
   const load = useCallback(async () => {
-    const res = await customerApi.get(id);
-    setCustomer(res.data.data.customer);
-    setPlans(res.data.data.plans);
-    setSummary(res.data.data.summary);
-    if (res.data.data.plans.length > 0) {
-      const pid = activePlanId || res.data.data.plans[0]._id;
-      setActivePlanId(pid);
+    try {
+      const res = await customerApi.get(id);
+      setCustomer(res.data.data.customer);
+      setPlans(res.data.data.plans);
+      setSummary(res.data.data.summary);
+      if (res.data.data.plans.length > 0) {
+        const pid = activePlanId || res.data.data.plans[0]._id;
+        setActivePlanId(pid);
+      }
+      setIsOfflineMode(false);
+    } catch {
+      // Offline fallback: load from IndexedDB
+      const [cachedCust, allPlans] = await Promise.all([
+        get('customers', id),
+        getAll('installmentPlans'),
+      ]);
+
+      if (cachedCust) {
+        setCustomer(cachedCust);
+        const customerPlans = allPlans.filter(
+          (p) => p.customerId === id || p.customerId?._id === id
+        );
+        setPlans(customerPlans);
+        if (customerPlans.length > 0) {
+          const pid = activePlanId || customerPlans[0]._id;
+          setActivePlanId(pid);
+          await loadOfflineSchedule(pid);
+        }
+        setIsOfflineMode(true);
+      } else {
+        toast.error('Customer not found in local cache.');
+      }
     }
-  }, [id, activePlanId]);
+  }, [id, activePlanId, loadOfflineSchedule]);
 
   useEffect(() => {
     setLoading(true);
@@ -52,18 +91,33 @@ export default function CustomerDetails() {
 
   useEffect(() => {
     if (!activePlanId) return;
-    planApi.get(activePlanId).then((res) => {
-      setSchedule(res.data.data.schedule);
-      setProfitDistribution(res.data.data.profitDistribution || null);
-    });
-  }, [activePlanId]);
+    if (navigator.onLine) {
+      planApi
+        .get(activePlanId)
+        .then((res) => {
+          setSchedule(res.data.data.schedule);
+          setProfitDistribution(res.data.data.profitDistribution || null);
+        })
+        .catch(() => loadOfflineSchedule(activePlanId));
+    } else {
+      loadOfflineSchedule(activePlanId);
+    }
+  }, [activePlanId, loadOfflineSchedule]);
 
   async function refreshPlan() {
     if (!activePlanId) return;
-    const res = await planApi.get(activePlanId);
-    setSchedule(res.data.data.schedule);
-    setProfitDistribution(res.data.data.profitDistribution || null);
-    setPlans((prev) => prev.map((p) => (p._id === activePlanId ? res.data.data.plan : p)));
+    if (navigator.onLine) {
+      try {
+        const res = await planApi.get(activePlanId);
+        setSchedule(res.data.data.schedule);
+        setProfitDistribution(res.data.data.profitDistribution || null);
+        setPlans((prev) => prev.map((p) => (p._id === activePlanId ? res.data.data.plan : p)));
+        return;
+      } catch {
+        // Fall through
+      }
+    }
+    await loadOfflineSchedule(activePlanId);
   }
 
   async function handleArchive() {
@@ -140,7 +194,14 @@ export default function CustomerDetails() {
     <div className="space-y-6">
       <div className="flex items-start justify-between flex-wrap gap-3 no-print">
         <div>
-          <h1 className="text-xl font-bold">{customer.name}</h1>
+          <h1 className="text-xl font-bold flex items-center gap-2">
+            {customer.name}
+            {isOfflineMode && (
+              <span className="badge bg-amber-500/10 text-amber-600 text-xs font-normal flex items-center gap-1">
+                <WifiOff className="w-3.5 h-3.5" /> Offline Mode
+              </span>
+            )}
+          </h1>
           <p className="text-sm text-gray-500">
             {customer.customerId} · {customer.contactNumber} {customer.address && `· ${customer.address}`}
           </p>

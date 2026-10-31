@@ -10,6 +10,7 @@ import {
   Wallet,
   AlertTriangle,
   PlusCircle,
+  WifiOff,
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 import { dashboardApi, ownerApi } from '../api/services';
@@ -17,6 +18,7 @@ import { useTheme } from '../context/ThemeContext';
 import { formatCurrency, formatDate } from '../utils/format';
 import StatCard from '../components/dashboard/StatCard';
 import StatusBadge from '../components/common/StatusBadge';
+import { getMetadata } from '../offline/db';
 
 export default function Dashboard() {
   const { theme } = useTheme();
@@ -24,14 +26,24 @@ export default function Dashboard() {
   const [ownerProfit, setOwnerProfit] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [isOfflineCache, setIsOfflineCache] = useState(false);
 
   useEffect(() => {
-    Promise.all([dashboardApi.summary(), ownerApi.profit()])
+    Promise.all([dashboardApi.summary(), ownerApi.profit().catch(() => null)])
       .then(([summaryRes, ownerRes]) => {
         setData(summaryRes.data.data);
-        setOwnerProfit(ownerRes.data.data);
+        if (ownerRes) setOwnerProfit(ownerRes.data.data);
+        setIsOfflineCache(false);
       })
-      .catch((err) => setError(err.response?.data?.message || 'Failed to load dashboard.'))
+      .catch(async () => {
+        const cached = await getMetadata('cachedDashboardSummary');
+        if (cached) {
+          setData(cached);
+          setIsOfflineCache(true);
+        } else {
+          setError('Failed to load dashboard and no offline cache is available.');
+        }
+      })
       .finally(() => setLoading(false));
   }, []);
 
@@ -55,8 +67,19 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
+      {isOfflineCache && (
+        <div className="bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-300 px-4 py-2.5 rounded-xl text-xs flex items-center gap-2">
+          <WifiOff className="w-4 h-4 shrink-0 text-amber-500" />
+          <span>
+            <strong>Offline Mode:</strong> Showing previously synchronized business metrics. Authoritative live figures will refresh when connection returns.
+          </span>
+        </div>
+      )}
+
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <h1 className="text-xl font-bold">Business Overview</h1>
+        <h1 className="text-xl font-bold flex items-center gap-2">
+          Business Overview
+        </h1>
         <div className="flex gap-2 flex-wrap">
           <Link to="/customers/new" className="btn-primary">
             <PlusCircle className="w-4 h-4" /> Add Customer

@@ -4,6 +4,8 @@ import toast from 'react-hot-toast';
 import { customerApi, planApi, fundingApi } from '../api/services';
 import { DURATION_OPTIONS } from '../utils/durationOptions';
 import MultiFundingSelector from '../components/investors/MultiFundingSelector';
+import { enqueueOperation, put } from '../offline/db';
+import { refreshPendingCount } from '../offline/syncManager';
 
 const emptyCustomer = {
   name: '',
@@ -86,6 +88,40 @@ export default function AddCustomer() {
     setSaving(true);
     let createdCustomer = null;
     let createdPlan = null;
+    const operationId = `op_cust_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+
+    // ── Offline handling ──────────────────────────────────────────────
+    if (!navigator.onLine) {
+      if (addPlan) {
+        toast.error('Financial contract and investor capital allocation require an active online connection to verify balances. Registering customer offline; contract can be added once online.');
+      }
+      try {
+        const localCust = {
+          _id: `local_${operationId}`,
+          customerId: `OFFLINE-${Date.now().toString().slice(-4)}`,
+          ...customer,
+          isPendingSync: true,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+
+        await enqueueOperation({
+          type: 'CREATE_CUSTOMER',
+          payload: customer,
+          localId: operationId,
+        });
+        await put('customers', localCust);
+        await refreshPendingCount();
+
+        toast.success('Customer registered offline — will synchronize automatically when online.');
+        navigate('/customers');
+        return;
+      } catch (err) {
+        toast.error('Failed to save customer locally: ' + err.message);
+        setSaving(false);
+        return;
+      }
+    }
 
     try {
       // ── Step 1: soft duplicate check ─────────────────────────────────────
@@ -108,8 +144,11 @@ export default function AddCustomer() {
       }
 
       // ── Step 2: create customer ───────────────────────────────────────────
-      const custRes = await customerApi.create(customer);
+      const custRes = await customerApi.create({ ...customer, operationId });
       createdCustomer = custRes.data.data;
+      if (createdCustomer) {
+        await put('customers', createdCustomer);
+      }
 
       if (addPlan) {
         // ── Step 3: create plan (BUSINESS funding used as placeholder — the
