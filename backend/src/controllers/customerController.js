@@ -73,20 +73,54 @@ const getCustomer = asyncHandler(async (req, res) => {
 
 const createCustomer = asyncHandler(async (req, res) => {
   const { name, contactNumber } = req.body;
+  const operationId = req.body.operationId || req.headers['x-operation-id'] || req.headers['idempotency-key'] || null;
+
+  if (operationId) {
+    const existing = await Customer.findOne({ operationId });
+    if (existing) {
+      return res.status(200).json({ success: true, data: existing, idempotentReplay: true });
+    }
+  }
+
   if (!name || !contactNumber) {
     return res.status(400).json({ success: false, message: 'Name and contact number are required.' });
   }
 
   const customerId = await generateCustomerId();
-  const customer = await Customer.create({ ...req.body, customerId });
-  res.status(201).json({ success: true, data: customer });
+  try {
+    const customer = await Customer.create({ ...req.body, customerId, operationId: operationId || undefined });
+    res.status(201).json({ success: true, data: customer });
+  } catch (err) {
+    if (err.code === 11000 && operationId && (err.keyPattern?.operationId || err.message?.includes('operationId'))) {
+      const existing = await Customer.findOne({ operationId });
+      if (existing) {
+        return res.status(200).json({ success: true, data: existing, idempotentReplay: true });
+      }
+    }
+    throw err;
+  }
 });
 
 const updateCustomer = asyncHandler(async (req, res) => {
   const customer = await Customer.findById(req.params.id);
   if (!customer || customer.isDeleted) return res.status(404).json({ success: false, message: 'Customer not found.' });
 
-  const { customerId, isDeleted, _id, createdAt, updatedAt, __v, ...updatable } = req.body;
+  // Conflict detection: If client provided lastKnownUpdatedAt and server record is newer
+  if (req.body.lastKnownUpdatedAt) {
+    const clientTimestamp = new Date(req.body.lastKnownUpdatedAt).getTime();
+    const serverTimestamp = new Date(customer.updatedAt).getTime();
+    if (serverTimestamp > clientTimestamp + 1000) {
+      // Detected concurrent update from another device/session
+      return res.status(409).json({
+        success: false,
+        conflict: true,
+        message: 'Record was updated on another device. Please review the updated server data.',
+        serverRecord: customer,
+      });
+    }
+  }
+
+  const { customerId, isDeleted, _id, createdAt, updatedAt, __v, lastKnownUpdatedAt, operationId, ...updatable } = req.body;
   Object.assign(customer, updatable);
   await customer.save();
   res.json({ success: true, data: customer });
