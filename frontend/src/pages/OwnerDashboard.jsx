@@ -1,11 +1,18 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { PlusCircle, Wallet, FileText, Download } from 'lucide-react';
+import { PlusCircle, Wallet, FileText, Download, WifiOff } from 'lucide-react';
 import { ownerApi, investorApi, withdrawalApi, ownerExportApi } from '../api/services';
 import { formatCurrency, formatDate } from '../utils/format';
 import WithdrawalModal from '../components/investors/WithdrawalModal';
 import OwnerTransactionModal from '../components/investors/OwnerTransactionModal';
+import {
+  getOwnerDataOffline,
+  setOwnerDataOffline,
+  queryOwnerTransactionsOffline,
+  queryWithdrawalsOffline,
+  putMany,
+} from '../offline/db';
 
 export default function OwnerDashboard() {
   const [profit, setProfit] = useState(null);
@@ -16,34 +23,86 @@ export default function OwnerDashboard() {
   const [showWithdraw, setShowWithdraw] = useState(false);
   const [showAddCapital, setShowAddCapital] = useState(false);
   const [txModalType, setTxModalType] = useState('PROFIT_CASH_WITHDRAWAL');
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
 
-  function load() {
-    setLoading(true);
-    Promise.all([
-      ownerApi.profit(),
-      ownerApi.capital(),
-      ownerApi.transactions({ page: 1, limit: 10 }),
-      ownerApi.withdrawals({ page: 1, limit: 10 }),
-    ])
-      .then(([profitRes, capitalRes, txRes, wdRes]) => {
-        setProfit(profitRes.data.data);
-        setCapital(capitalRes.data.data);
-        setTransactions(txRes.data.data);
-        setWithdrawals(wdRes.data.data);
-      })
-      .catch(() => toast.error('Failed to load owner dashboard.'))
-      .finally(() => setLoading(false));
+  async function load() {
+    // 1. Immediately read cached owner data from IndexedDB
+    try {
+      const [cachedOwner, cachedTxs, cachedWds] = await Promise.all([
+        getOwnerDataOffline(),
+        queryOwnerTransactionsOffline({ limit: 10 }),
+        queryWithdrawalsOffline({ source: 'OWNER', limit: 10 }),
+      ]);
+
+      if (cachedOwner?.profit) {
+        setProfit(cachedOwner.profit);
+        setCapital(cachedOwner.capital);
+        setTransactions(cachedTxs.data || []);
+        setWithdrawals(cachedWds.data || []);
+        setLoading(false);
+      }
+    } catch {
+      // Ignored
+    }
+
+    // 2. If online, fetch fresh server data in background
+    if (navigator.onLine) {
+      Promise.all([
+        ownerApi.profit(),
+        ownerApi.capital(),
+        ownerApi.transactions({ page: 1, limit: 10 }),
+        ownerApi.withdrawals({ page: 1, limit: 10 }),
+      ])
+        .then(([profitRes, capitalRes, txRes, wdRes]) => {
+          setProfit(profitRes.data.data);
+          setCapital(capitalRes.data.data);
+          setTransactions(txRes.data.data);
+          setWithdrawals(wdRes.data.data);
+
+          // Save fresh snapshots to IndexedDB
+          setOwnerDataOffline({
+            profit: profitRes.data.data,
+            capital: capitalRes.data.data,
+          });
+          putMany('ownerTransactions', txRes.data.data);
+          putMany('withdrawals', wdRes.data.data);
+          setIsOffline(false);
+        })
+        .catch(() => setIsOffline(true))
+        .finally(() => setLoading(false));
+    } else {
+      setIsOffline(true);
+      setLoading(false);
+    }
   }
 
-  useEffect(load, []);
+  useEffect(() => {
+    load();
+  }, []);
 
-  if (loading) return <div className="p-8 text-center text-gray-400">Loading...</div>;
-  if (!profit) return null;
+  if (loading && !profit) return <div className="p-8 text-center text-gray-400">Loading owner dashboard...</div>;
+  if (!profit) return <div className="p-8 text-center text-gray-400">Owner data not available.</div>;
 
   return (
     <div className="space-y-6">
+      {isOffline && (
+        <div className="bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-300 px-4 py-2.5 rounded-xl text-xs flex items-center gap-2">
+          <WifiOff className="w-4 h-4 shrink-0 text-amber-500" />
+          <span>
+            <strong>Offline Mode:</strong> Showing previously synchronized Owner balances and ledger. Live server transactions will refresh when online.
+          </span>
+        </div>
+      )}
+
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <h1 className="text-xl font-bold">Owner Dashboard</h1>
+        <h1 className="text-xl font-bold flex items-center gap-2">
+          Owner Dashboard
+          {isOffline && (
+            <span className="badge bg-amber-500/10 text-amber-600 text-[11px] font-normal flex items-center gap-1">
+              <WifiOff className="w-3 h-3" /> Offline
+            </span>
+          )}
+        </h1>
         <div className="flex gap-2 flex-wrap">
           <Link to="/owner/funded-customers" className="btn-secondary text-xs">Funded Customers</Link>
           <Link to="/owner/funded-contracts" className="btn-secondary text-xs">Funded Contracts</Link>

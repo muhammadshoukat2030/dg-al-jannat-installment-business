@@ -2,6 +2,8 @@ import { useState, useMemo } from 'react';
 import toast from 'react-hot-toast';
 import { investorApi } from '../../api/services';
 import { formatCurrency } from '../../utils/format';
+import { put, enqueueOperation } from '../../offline/db';
+import { refreshPendingCount } from '../../offline/syncManager';
 
 /**
  * Unified Investor Transaction Modal
@@ -81,6 +83,33 @@ export default function TransactionModal({ investor, capital, profit, defaultTyp
 
     setSaving(true);
     try {
+      if (!navigator.onLine && (transactionType === 'INVESTMENT_IN' || transactionType === 'RETURN_TO_INVESTOR')) {
+        const operationId = 'op_tx_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+        const localTx = {
+          _id: 'local_' + operationId,
+          investorId: investor._id,
+          transactionType,
+          amount: numAmount,
+          transactionDate: transactionDate || new Date().toISOString(),
+          notes,
+          operationId,
+        };
+        await put('investorTransactions', localTx);
+        await enqueueOperation({
+          operationId,
+          type: 'ADD_INVESTOR_TRANSACTION',
+          payload: { investorId: investor._id, transactionType, amount: numAmount, transactionDate, notes },
+        });
+        await refreshPendingCount();
+        toast.success(
+          transactionType === 'INVESTMENT_IN'
+            ? 'Capital added offline. Will sync automatically.'
+            : 'Capital return recorded offline. Will sync automatically.'
+        );
+        onSuccess();
+        return;
+      }
+
       if (transactionType === 'PROFIT_CASH_WITHDRAWAL' || transactionType === 'PROFIT_TO_CAPITAL') {
         await investorApi.profitTransaction(investor._id, {
           transactionType,

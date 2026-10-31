@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 import { FileText, Download, ArrowLeft } from 'lucide-react';
 import { ownerApi, ownerExportApi } from '../api/services';
 import { formatCurrency } from '../utils/format';
+import { queryOwnerFundedCustomersOffline, getOwnerDataOffline } from '../offline/db';
 
 export default function OwnerFundedCustomers() {
   const [data, setData] = useState([]);
@@ -15,8 +16,27 @@ export default function OwnerFundedCustomers() {
   const [exporting, setExporting] = useState(false);
   const limit = 20;
 
-  function load() {
+  async function load() {
     setLoading(true);
+    // 1. Immediate local-first load from IndexedDB
+    try {
+      const [localCustomers, localOwnerData] = await Promise.all([
+        queryOwnerFundedCustomersOffline({ search, page, limit }),
+        getOwnerDataOffline(),
+      ]);
+      if (localCustomers && localCustomers.data.length > 0) {
+        setData(localCustomers.data);
+        setTotal(localCustomers.total);
+        setLoading(false);
+      }
+      if (localOwnerData?.fundedSummary) {
+        setSummary(localOwnerData.fundedSummary);
+      }
+    } catch {
+      // fallback
+    }
+
+    // 2. Server revalidate
     Promise.all([
       ownerApi.fundedCustomers({ search, page, limit }),
       ownerApi.fundedSummary(),
@@ -26,7 +46,9 @@ export default function OwnerFundedCustomers() {
         setTotal(customersRes.data.total);
         setSummary(summaryRes.data.data);
       })
-      .catch(() => toast.error('Failed to load customers.'))
+      .catch(() => {
+        // retain local data if offline
+      })
       .finally(() => setLoading(false));
   }
 

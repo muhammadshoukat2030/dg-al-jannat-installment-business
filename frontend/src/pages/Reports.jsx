@@ -4,6 +4,7 @@ import { FileDown, FileSpreadsheet } from 'lucide-react';
 import { reportApi, exportApi } from '../api/services';
 import { formatCurrency, formatDate } from '../utils/format';
 import DateFilterBar from '../components/common/DateFilterBar';
+import { getReportOffline, setReportOffline } from '../offline/db';
 
 const REPORTS = [
   { key: 'profit', label: 'Profit Report', pdf: 'profitLossPdf', excel: 'profitLossExcel', dateBased: false },
@@ -27,13 +28,30 @@ export default function Reports() {
   async function loadReport(key, filter = dateFilter) {
     setActive(key);
     setLoading(true);
+    // 1. Immediate local-first read from IndexedDB reports cache
+    try {
+      const cached = await getReportOffline(key);
+      if (cached && Array.isArray(cached) && cached.length > 0) {
+        setRows(cached);
+        setLoading(false);
+      }
+    } catch {
+      // ignore
+    }
+
+    // 2. Server revalidation
     try {
       const report = REPORTS.find((r) => r.key === key);
       const params = report?.dateBased ? filter : undefined;
       const res = await reportApi[key](params);
-      setRows(res.data.data);
+      if (res.data?.data) {
+        setRows(res.data.data);
+        await setReportOffline(key, res.data.data);
+      }
     } catch (err) {
-      toast.error('Failed to load report.');
+      if (navigator.onLine) {
+        toast.error('Failed to load report from server.');
+      }
     } finally {
       setLoading(false);
     }

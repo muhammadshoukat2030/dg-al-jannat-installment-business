@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { investorApi } from '../api/services';
+import { get, put, enqueueOperation } from '../offline/db';
+import { refreshPendingCount } from '../offline/syncManager';
 
 export default function EditInvestor() {
   const { id } = useParams();
@@ -10,7 +12,15 @@ export default function EditInvestor() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    investorApi.get(id).then((res) => setInvestor(res.data.data.investor));
+    // 1. Local-first load from IndexedDB
+    get('investors', id).then((local) => {
+      if (local) setInvestor(local);
+    }).catch(() => {});
+
+    // 2. Server revalidation
+    investorApi.get(id).then((res) => {
+      if (res.data?.data?.investor) setInvestor(res.data.data.investor);
+    }).catch(() => {});
   }, [id]);
 
   function update(field, value) {
@@ -21,6 +31,21 @@ export default function EditInvestor() {
     e.preventDefault();
     setSaving(true);
     try {
+      if (!navigator.onLine) {
+        const operationId = 'op_upd_inv_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+        const updated = { ...investor, _id: id, updatedAt: new Date().toISOString() };
+        await put('investors', updated);
+        await enqueueOperation({
+          operationId,
+          type: 'UPDATE_INVESTOR',
+          payload: updated,
+        });
+        await refreshPendingCount();
+        toast.success('Investor updated offline. Changes will sync automatically when online.');
+        navigate(`/investors/${id}`);
+        return;
+      }
+
       await investorApi.update(id, investor);
       toast.success('Investor updated.');
       navigate(`/investors/${id}`);

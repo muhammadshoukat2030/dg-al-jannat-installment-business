@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { investorApi } from '../api/services';
+import { put, enqueueOperation } from '../offline/db';
+import { refreshPendingCount } from '../offline/syncManager';
 
 const empty = {
   name: '',
@@ -31,6 +33,52 @@ export default function AddInvestor() {
     }
     setSaving(true);
     try {
+      if (!navigator.onLine) {
+        const operationId = 'op_inv_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+        const tempId = 'temp_' + operationId;
+        const localRecord = {
+          _id: tempId,
+          ...investor,
+          investorId: 'PENDING_SYNC',
+          createdAt: new Date().toISOString(),
+          operationId,
+        };
+        await put('investors', localRecord);
+        await enqueueOperation({
+          operationId,
+          type: 'CREATE_INVESTOR',
+          payload: investor,
+        });
+
+        if (initialInvestment && Number(initialInvestment) > 0) {
+          const txOpId = 'op_tx_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+          await put('investorTransactions', {
+            _id: 'local_' + txOpId,
+            investorId: tempId,
+            transactionType: 'INVESTMENT_IN',
+            amount: Number(initialInvestment),
+            transactionDate: new Date().toISOString(),
+            notes: 'Initial investment',
+            operationId: txOpId,
+          });
+          await enqueueOperation({
+            operationId: txOpId,
+            type: 'ADD_INVESTOR_TRANSACTION',
+            payload: {
+              investorId: tempId,
+              transactionType: 'INVESTMENT_IN',
+              amount: Number(initialInvestment),
+              notes: 'Initial investment',
+            },
+          });
+        }
+
+        await refreshPendingCount();
+        toast.success('Investor saved offline. Will sync automatically when online.');
+        navigate('/investors');
+        return;
+      }
+
       const res = await investorApi.create(investor);
       const created = res.data.data;
 

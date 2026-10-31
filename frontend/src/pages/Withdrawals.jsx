@@ -6,6 +6,7 @@ import { withdrawalApi, investorApi } from '../api/services';
 import { formatCurrency, formatDate } from '../utils/format';
 import DateFilterBar from '../components/common/DateFilterBar';
 import WithdrawalModal from '../components/investors/WithdrawalModal';
+import { queryWithdrawalsOffline, queryInvestorsOffline } from '../offline/db';
 
 export default function Withdrawals() {
   const [withdrawals, setWithdrawals] = useState([]);
@@ -19,17 +20,34 @@ export default function Withdrawals() {
   const [showModal, setShowModal] = useState(false);
 
   useEffect(() => {
-    investorApi.list({ limit: 200 }).then((res) => setInvestors(res.data.data));
+    // 1. Local-first
+    queryInvestorsOffline({ limit: 200 }).then((local) => {
+      if (local && local.data.length > 0) setInvestors(local.data);
+    }).catch(() => {});
+
+    // 2. Server revalidation
+    investorApi.list({ limit: 200 }).then((res) => setInvestors(res.data.data)).catch(() => {});
   }, []);
 
   function refresh() {
     setLoading(true);
+    // 1. Local-first
+    queryWithdrawalsOffline({ page, limit: 20, investorId: investorFilter || undefined }).then((local) => {
+      if (local && local.data.length > 0) {
+        setWithdrawals(local.data);
+        setPages(local.pages || 1);
+        setLoading(false);
+      }
+    }).catch(() => {});
+
+    // 2. Server revalidation
     withdrawalApi
       .list({ page, limit: 20, investorId: investorFilter || undefined, ...dateFilter })
       .then((res) => {
         setWithdrawals(res.data.data);
         setPages(res.data.pages || 1);
       })
+      .catch(() => {})
       .finally(() => setLoading(false));
   }
 

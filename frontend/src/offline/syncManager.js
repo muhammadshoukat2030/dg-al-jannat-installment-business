@@ -15,6 +15,7 @@ import {
   updateOperation,
   removeOperation,
   requestStoragePersistence,
+  setReportOffline,
 } from './db';
 
 // Listeners for sync state changes
@@ -150,7 +151,21 @@ export async function triggerSync() {
 async function performBootstrapSync() {
   const res = await client.get('/sync/bootstrap');
   if (res.data?.success && res.data?.data) {
-    const { customers, plans, installments, payments, investors, dashboard } = res.data.data;
+    const {
+      customers,
+      plans,
+      installments,
+      payments,
+      investors,
+      investorTransactions,
+      withdrawals,
+      ownerTransactions,
+      settings,
+      ownerData,
+      dashboard,
+      investorSummaries,
+      reports,
+    } = res.data.data;
 
     await Promise.all([
       putMany('customers', customers || []),
@@ -158,10 +173,24 @@ async function performBootstrapSync() {
       putMany('installments', installments || []),
       putMany('payments', payments || []),
       putMany('investors', investors || []),
+      putMany('investorTransactions', investorTransactions || []),
+      putMany('withdrawals', withdrawals || []),
+      putMany('ownerTransactions', ownerTransactions || []),
     ]);
 
+    if (settings) await setMetadata('businessSettings', settings);
+    if (ownerData) await setMetadata('ownerData', ownerData);
+    if (investorSummaries) await setMetadata('cachedInvestorSummaries', investorSummaries);
+    if (reports) {
+      for (const [key, rows] of Object.entries(reports)) {
+        await setReportOffline(key, rows);
+      }
+    }
     if (dashboard) {
       await setMetadata('cachedDashboardSummary', dashboard);
+      if (dashboard.investorOverview) {
+        await setMetadata('cachedInvestorOverview', dashboard.investorOverview);
+      }
     }
     await setMetadata('initialSyncCompleted', true);
   }
@@ -178,7 +207,21 @@ async function performDeltaSync() {
 
   const res = await client.get('/sync/delta', { params: { since } });
   if (res.data?.success && res.data?.data) {
-    const { customers, plans, installments, payments, investors } = res.data.data;
+    const {
+      customers,
+      plans,
+      installments,
+      payments,
+      investors,
+      investorTransactions,
+      withdrawals,
+      ownerTransactions,
+      settings,
+      ownerData,
+      dashboard,
+      investorSummaries,
+      reports,
+    } = res.data.data;
 
     await Promise.all([
       putMany('customers', customers || []),
@@ -186,7 +229,25 @@ async function performDeltaSync() {
       putMany('installments', installments || []),
       putMany('payments', payments || []),
       putMany('investors', investors || []),
+      putMany('investorTransactions', investorTransactions || []),
+      putMany('withdrawals', withdrawals || []),
+      putMany('ownerTransactions', ownerTransactions || []),
     ]);
+
+    if (settings) await setMetadata('businessSettings', settings);
+    if (ownerData) await setMetadata('ownerData', ownerData);
+    if (investorSummaries) await setMetadata('cachedInvestorSummaries', investorSummaries);
+    if (reports) {
+      for (const [key, rows] of Object.entries(reports)) {
+        await setReportOffline(key, rows);
+      }
+    }
+    if (dashboard) {
+      await setMetadata('cachedDashboardSummary', dashboard);
+      if (dashboard.investorOverview) {
+        await setMetadata('cachedInvestorOverview', dashboard.investorOverview);
+      }
+    }
   }
 }
 
@@ -212,6 +273,12 @@ async function pushOfflineOperations() {
           await put('customers', serverRecord);
         } else if (type === 'UPDATE_CUSTOMER' && serverRecord) {
           await put('customers', serverRecord);
+        } else if ((type === 'CREATE_INVESTOR' || type === 'UPDATE_INVESTOR') && serverRecord) {
+          await put('investors', serverRecord);
+        } else if (type === 'ADD_INVESTOR_TRANSACTION' && serverRecord) {
+          await put('investorTransactions', serverRecord);
+        } else if (type === 'RECORD_WITHDRAWAL' && serverRecord) {
+          await put('withdrawals', serverRecord);
         }
 
         // Successfully confirmed by server -> Remove from queue
