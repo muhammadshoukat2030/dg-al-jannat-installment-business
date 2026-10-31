@@ -15,6 +15,7 @@ const withdrawalSchema = new mongoose.Schema(
     withdrawalDate: { type: Date, required: true, default: Date.now },
     reference: { type: String, trim: true, default: '' },
     notes: { type: String, trim: true, default: '' },
+    operationId: { type: String, sparse: true, unique: true },
     status: { type: String, enum: ['COMPLETED'], default: 'COMPLETED' },
     // withdrawalType distinguishes cash-out (PROFIT_CASH, the default for all historical records)
     // from profit-to-capital transfers (PROFIT_TO_CAPITAL). Old records without this field default

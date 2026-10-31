@@ -1,6 +1,17 @@
 const Customer = require('../models/Customer');
 const InstallmentPlan = require('../models/InstallmentPlan');
 const Payment = require('../models/Payment');
+const Investor = require('../models/Investor');
+
+async function generateInvestorId() {
+  const latest = await Investor.findOne({}, { investorId: 1 }).sort({ investorId: -1 });
+  let nextNum = 1;
+  if (latest && latest.investorId) {
+    const match = latest.investorId.match(/\d+/);
+    if (match) nextNum = parseInt(match[0], 10) + 1;
+  }
+  return `INV-${String(nextNum).padStart(4, '0')}`;
+}
 
 async function generateCustomerId() {
   const latest = await Customer.findOne({}, { customerId: 1 }).sort({ customerId: -1 });
@@ -35,5 +46,5 @@ async function generateReceiptNumber() {
   return `${prefix}${String(nextNum).padStart(6, '0')}`;
 }
 
-module.exports = { generateCustomerId, generateContractId, generateReceiptNumber };
+module.exports = { generateCustomerId, generateContractId, generateReceiptNumber, generateInvestorId };
 
