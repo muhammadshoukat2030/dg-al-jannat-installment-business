@@ -18,7 +18,7 @@ import { useTheme } from '../context/ThemeContext';
 import { formatCurrency, formatDate } from '../utils/format';
 import StatCard from '../components/dashboard/StatCard';
 import StatusBadge from '../components/common/StatusBadge';
-import { getMetadata } from '../offline/db';
+import { getMetadata, getDashboardOffline } from '../offline/db';
 
 export default function Dashboard() {
   const { theme } = useTheme();
@@ -31,8 +31,8 @@ export default function Dashboard() {
   useEffect(() => {
     let isMounted = true;
 
-    // 1. Immediately read cached dashboard summary from IndexedDB
-    getMetadata('cachedDashboardSummary')
+    // 1. Immediately read cached dashboard summary or derive from local IndexedDB
+    getDashboardOffline()
       .then((cached) => {
         if (cached && isMounted) {
           setData(cached);
@@ -65,9 +65,9 @@ export default function Dashboard() {
         })
         .catch(async () => {
           if (!isMounted) return;
-          const cached = await getMetadata('cachedDashboardSummary');
-          if (cached) {
-            setData(cached);
+          const localDash = await getDashboardOffline();
+          if (localDash && isMounted) {
+            setData(localDash);
             setIsOfflineCache(true);
           } else {
             setData((prev) => {
@@ -81,9 +81,12 @@ export default function Dashboard() {
         });
     } else {
       setIsOfflineCache(true);
-      setTimeout(() => {
+      getDashboardOffline().then((localDash) => {
+        if (localDash && isMounted) {
+          setData(localDash);
+        }
         if (isMounted) setLoading(false);
-      }, 50);
+      });
     }
 
     return () => {

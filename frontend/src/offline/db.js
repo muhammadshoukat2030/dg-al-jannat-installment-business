@@ -855,3 +855,68 @@ export async function archiveCustomerOffline(customerId) {
     await put('customers', customer);
   }
 }
+
+export async function getDashboardOffline() {
+  const cached = await getMetadata('cachedDashboardSummary');
+  if (cached && typeof cached === 'object' && cached.totalCustomers !== undefined) {
+    return cached;
+  }
+
+  // Derive directly from local IndexedDB collections
+  const [plans, installments, payments, customers, investors] = await Promise.all([
+    getAll('installmentPlans'),
+    getAll('installments'),
+    getAll('payments'),
+    getAll('customers'),
+    getAll('investors'),
+  ]);
+
+  const activePlans = plans.filter((p) => !p.isDeleted);
+  const activeCustomers = customers.filter((c) => !c.isDeleted);
+  const activeInvestors = investors.filter((i) => !i.isDeleted);
+
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const currentMonthStr = todayStr.slice(0, 7);
+
+  const todayPayments = payments.filter((p) => (p.paymentDate || p.createdAt || '').slice(0, 10) === todayStr);
+  const todayCollection = todayPayments.reduce((sum, p) => sum + (p.amount || 0), 0);
+
+  const monthPayments = payments.filter((p) => (p.paymentDate || p.createdAt || '').slice(0, 7) === currentMonthStr);
+  const monthlyCollection = monthPayments.reduce((sum, p) => sum + (p.amount || 0), 0);
+
+  const totalSales = activePlans.reduce((sum, p) => sum + (p.sellingPrice || p.totalAmount || 0), 0);
+  const totalReceived = payments.reduce((sum, p) => sum + (p.amount || 0), 0);
+  const totalRemaining = Math.max(0, totalSales - totalReceived);
+
+  const todayDate = new Date();
+  todayDate.setHours(0, 0, 0, 0);
+  const overdueInstallments = installments.filter((inst) => {
+    if (inst.status === 'PAID') return false;
+    const due = new Date(inst.dueDate);
+    return due < todayDate;
+  });
+
+  const totalOutstanding = activePlans.reduce((sum, plan) => {
+    if (plan.remainingAmount !== undefined) return sum + (plan.remainingAmount || 0);
+    const planPayments = payments.filter((p) => String(p.planId) === String(plan._id));
+    const paid = planPayments.reduce((s, p) => s + (p.amount || 0), 0);
+    return sum + Math.max(0, (plan.sellingPrice || plan.totalAmount || 0) - paid);
+  }, 0);
+
+  return {
+    totalCustomers: activeCustomers.length,
+    totalSales,
+    totalReceived,
+    totalRemaining,
+    todayCollection,
+    monthlyCollection,
+    totalOutstanding,
+    overdueCount: overdueInstallments.length,
+    recentPayments: payments.slice(0, 10),
+    recentCustomers: activeCustomers.slice(0, 10),
+    investorOverview: {
+      totalInvestors: activeInvestors.length,
+      totalCapital: 0,
+    },
+  };
+}
