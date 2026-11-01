@@ -570,12 +570,44 @@ export async function getInvestorOffline(id) {
 
   const invested = invTx.filter((t) => t.transactionType === 'INVESTMENT_IN').reduce((sum, t) => sum + Number(t.amount || 0), 0);
   const returned = invTx.filter((t) => t.transactionType === 'RETURN_TO_INVESTOR').reduce((sum, t) => sum + Number(t.amount || 0), 0);
-  const held = invested - returned;
+  const profitToCapital = invTx.filter((t) => t.transactionType === 'PROFIT_TO_CAPITAL').reduce((sum, t) => sum + Number(t.amount || 0), 0);
+  const held = (invested + profitToCapital) - returned;
   const deployed = invPlans.reduce((sum, p) => sum + Number(p.capitalDeployed || p.purchaseCost || 0), 0);
   const available = Math.max(0, held - deployed);
 
+  // Chronological FIFO breakdown of remaining capital held
+  const sortedInvTx = [...invTx]
+    .filter((t) => ['INVESTMENT_IN', 'PROFIT_TO_CAPITAL', 'RETURN_TO_INVESTOR'].includes(t.transactionType))
+    .sort((a, b) => {
+      const da = a.transactionDate ? new Date(a.transactionDate).toISOString().slice(0, 10) : '';
+      const db = b.transactionDate ? new Date(b.transactionDate).toISOString().slice(0, 10) : '';
+      if (da !== db) return da.localeCompare(db);
+      return new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime();
+    });
+  const invLots = [];
+  for (const t of sortedInvTx) {
+    const amt = Number(t.amount || 0);
+    if (amt <= 0) continue;
+    if (t.transactionType === 'INVESTMENT_IN') invLots.push({ type: 'DIRECT', remaining: amt });
+    else if (t.transactionType === 'PROFIT_TO_CAPITAL') invLots.push({ type: 'PROFIT', remaining: amt });
+    else if (t.transactionType === 'RETURN_TO_INVESTOR') {
+      let toRet = amt;
+      for (const l of invLots) {
+        if (toRet <= 0) break;
+        if (l.remaining <= 0) continue;
+        const take = Math.min(l.remaining, toRet);
+        l.remaining = Math.round((l.remaining - take) * 100) / 100;
+        toRet = Math.round((toRet - take) * 100) / 100;
+      }
+    }
+  }
+  const remainingDirectCapital = Math.round(invLots.filter((l) => l.type === 'DIRECT').reduce((sum, l) => sum + l.remaining, 0) * 100) / 100;
+  const remainingProfitTransferred = Math.round(invLots.filter((l) => l.type === 'PROFIT').reduce((sum, l) => sum + l.remaining, 0) * 100) / 100;
+
   const derivedCapital = {
     capitalHeld: held,
+    remainingDirectCapital,
+    remainingProfitTransferred,
     customersFunded: new Set(invPlans.map((p) => String(p.customerId?._id || p.customerId))).size,
     contractsFunded: invPlans.length,
     customerCollections: invPlans.reduce((sum, p) => sum + Number(p.totalPaid || 0) + Number(p.downPayment || 0), 0),
