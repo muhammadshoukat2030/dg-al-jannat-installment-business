@@ -197,6 +197,7 @@ const createTransaction = asyncHandler(async (req, res) => {
     amount: numAmount,
     transactionDate: transactionDate ? new Date(transactionDate) : new Date(),
     notes: notes || '',
+    operationId: req.body.operationId || undefined,
   });
 
   const capital = await investorService.getInvestorCapitalSummary(investor._id);
@@ -207,7 +208,7 @@ const investorProfitTransaction = asyncHandler(async (req, res) => {
   const investor = await Investor.findById(req.params.id);
   if (!investor || investor.isDeleted) return res.status(404).json({ success: false, message: 'Investor not found.' });
 
-  const { transactionType, amount, transactionDate, notes } = req.body;
+  const { transactionType, amount, transactionDate, notes, operationId } = req.body;
   const numAmount = Number(amount);
   if (!(numAmount > 0) || !Number.isFinite(numAmount)) {
     return res.status(400).json({ success: false, message: 'Amount must be greater than 0.' });
@@ -220,6 +221,7 @@ const investorProfitTransaction = asyncHandler(async (req, res) => {
         amount: numAmount,
         date: transactionDate,
         notes,
+        operationId,
       });
     } else if (transactionType === 'PROFIT_TO_CAPITAL') {
       await accountingService.processInvestorProfitToCapital({
@@ -227,6 +229,7 @@ const investorProfitTransaction = asyncHandler(async (req, res) => {
         amount: numAmount,
         date: transactionDate,
         notes,
+        operationId,
       });
     } else {
       return res.status(400).json({ success: false, message: 'Invalid profit transaction type.' });

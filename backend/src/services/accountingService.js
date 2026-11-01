@@ -544,7 +544,7 @@ async function getOwnerCapitalSummary() {
  * for that, created only via processWithdrawal). A capital return can never
  * exceed the capital currently held.
  */
-async function recordOwnerCapitalTransaction({ transactionType, amount, transactionDate, notes }) {
+async function recordOwnerCapitalTransaction({ transactionType, amount, transactionDate, notes, operationId }) {
   if (!['CAPITAL_IN', 'CAPITAL_RETURNED'].includes(transactionType)) {
     throw Object.assign(new Error('Invalid owner capital transaction type.'), { statusCode: 400 });
   }
@@ -567,6 +567,7 @@ async function recordOwnerCapitalTransaction({ transactionType, amount, transact
     amount,
     transactionDate: transactionDate ? new Date(transactionDate) : new Date(),
     notes: notes || '',
+    operationId: operationId || undefined,
   });
 
   return { transaction, capital: await getOwnerCapitalSummary() };
@@ -581,7 +582,7 @@ function round2(n) {
  * Creates only an InvestorTransaction(PROFIT_WITHDRAWAL). Does NOT create a
  * Withdrawal record and does NOT increase capital.
  */
-async function processInvestorProfitCashWithdrawal({ investorId, amount, date, notes }) {
+async function processInvestorProfitCashWithdrawal({ investorId, amount, date, notes, operationId }) {
   if (!(amount > 0)) {
     throw Object.assign(new Error('Amount must be greater than 0.'), { statusCode: 400 });
   }
@@ -604,6 +605,7 @@ async function processInvestorProfitCashWithdrawal({ investorId, amount, date, n
     amount: round2(amount),
     transactionDate: date ? new Date(date) : new Date(),
     notes: notes || '',
+    operationId: operationId || undefined,
   });
   return await getInvestorProfitSummary(investorId);
 }
@@ -613,7 +615,7 @@ async function processInvestorProfitCashWithdrawal({ investorId, amount, date, n
  * Creates only an InvestorTransaction(PROFIT_TO_CAPITAL). Picked up by
  * getInvestorCapitalSummary as profitTransferredToCapital → increases capitalAvailable.
  */
-async function processInvestorProfitToCapital({ investorId, amount, date, notes }) {
+async function processInvestorProfitToCapital({ investorId, amount, date, notes, operationId }) {
   if (!(amount > 0)) {
     throw Object.assign(new Error('Amount must be greater than 0.'), { statusCode: 400 });
   }
@@ -636,6 +638,7 @@ async function processInvestorProfitToCapital({ investorId, amount, date, notes 
     amount: round2(amount),
     transactionDate: date ? new Date(date) : new Date(),
     notes: notes || '',
+    operationId: operationId || undefined,
   });
   return await getInvestorProfitSummary(investorId);
 }
@@ -644,7 +647,7 @@ async function processInvestorProfitToCapital({ investorId, amount, date, notes 
  * Standalone owner profit cash withdrawal (NOT the 50/50 paired flow).
  * Creates an OwnerTransaction(OWNER_WITHDRAWAL). Does NOT increase capital.
  */
-async function processOwnerProfitCashWithdrawal({ amount, date, notes }) {
+async function processOwnerProfitCashWithdrawal({ amount, date, notes, operationId }) {
   if (!(amount > 0)) {
     throw Object.assign(new Error('Amount must be greater than 0.'), { statusCode: 400 });
   }
@@ -662,6 +665,7 @@ async function processOwnerProfitCashWithdrawal({ amount, date, notes }) {
     amount: round2(amount),
     transactionDate: date ? new Date(date) : new Date(),
     notes: notes || '',
+    operationId: operationId || undefined,
   });
   return await getOwnerProfitSummary();
 }
@@ -671,7 +675,7 @@ async function processOwnerProfitCashWithdrawal({ amount, date, notes }) {
  * Creates an OwnerTransaction(OWNER_PROFIT_TO_CAPITAL). Picked up by
  * getOwnerCapitalSummary as profitTransferredToCapital → increases capitalAvailable.
  */
-async function processOwnerProfitToCapital({ amount, date, notes }) {
+async function processOwnerProfitToCapital({ amount, date, notes, operationId }) {
   if (!(amount > 0)) {
     throw Object.assign(new Error('Amount must be greater than 0.'), { statusCode: 400 });
   }
@@ -689,6 +693,7 @@ async function processOwnerProfitToCapital({ amount, date, notes }) {
     amount: round2(amount),
     transactionDate: date ? new Date(date) : new Date(),
     notes: notes || '',
+    operationId: operationId || undefined,
   });
   return { profit: await getOwnerProfitSummary(), capital: await getOwnerCapitalSummary() };
 }

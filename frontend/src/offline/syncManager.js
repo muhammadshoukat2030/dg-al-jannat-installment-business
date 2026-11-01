@@ -635,6 +635,10 @@ async function pushOfflineOperations() {
           await put('investorTransactions', serverRecord);
           if (op?.localId) await deleteItem('investorTransactions', op.localId);
           await deleteItem('investorTransactions', 'local_' + operationId);
+        } else if (type === 'ADD_OWNER_TRANSACTION' && serverRecord) {
+          await put('ownerTransactions', serverRecord);
+          if (op?.localId) await deleteItem('ownerTransactions', op.localId);
+          await deleteItem('ownerTransactions', 'local_' + operationId);
         } else if (type === 'RECORD_WITHDRAWAL' && serverRecord) {
           await put('withdrawals', serverRecord);
           if (op?.localId) await deleteItem('withdrawals', op.localId);

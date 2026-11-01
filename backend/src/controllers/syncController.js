@@ -818,9 +818,42 @@ const pushSync = asyncHandler(async (req, res) => {
         } else {
           const { investorId, transactionType, amount, transactionDate, notes } = payload;
           const targetInvestorId = await resolveInvestorId(investorId);
+          let normalizedType = transactionType;
+          if (transactionType === 'PROFIT_CASH_WITHDRAWAL') normalizedType = 'PROFIT_WITHDRAWAL';
+
           const tx = await InvestorTransaction.create({
             investorId: targetInvestorId,
-            transactionType,
+            transactionType: normalizedType,
+            amount: Number(amount),
+            transactionDate: transactionDate || new Date(),
+            notes: notes || '',
+            operationId,
+          });
+          results.push({
+            operationId,
+            type,
+            status: 'CONFIRMED',
+            serverRecord: tx,
+          });
+        }
+      } else if (type === 'ADD_OWNER_TRANSACTION') {
+        const existing = await OwnerTransaction.findOne({ operationId });
+        if (existing) {
+          results.push({
+            operationId,
+            type,
+            status: 'CONFIRMED',
+            idempotentReplay: true,
+            serverRecord: existing,
+          });
+        } else {
+          const { transactionType, amount, transactionDate, notes } = payload;
+          let normalizedType = transactionType;
+          if (transactionType === 'PROFIT_CASH_WITHDRAWAL') normalizedType = 'OWNER_WITHDRAWAL';
+          if (transactionType === 'PROFIT_TO_CAPITAL') normalizedType = 'OWNER_PROFIT_TO_CAPITAL';
+
+          const tx = await OwnerTransaction.create({
+            transactionType: normalizedType,
             amount: Number(amount),
             transactionDate: transactionDate || new Date(),
             notes: notes || '',

@@ -540,11 +540,232 @@ export async function setSettingsOffline(settings) {
 }
 
 export async function getOwnerDataOffline() {
-  return getMetadata('ownerData');
+  const cached = await getMetadata('ownerData');
+  const [allOwnerTx, ownerAllocations] = await Promise.all([
+    getAll('ownerTransactions'),
+    getAll('fundingAllocations'),
+  ]);
+
+  if (!allOwnerTx || allOwnerTx.length === 0) {
+    return cached || null;
+  }
+
+  // Derive Owner capital and profit dynamically from IndexedDB records
+  const ownerTx = [...allOwnerTx];
+
+  const capitalInTxs = ownerTx
+    .filter((t) => t.transactionType === 'CAPITAL_IN')
+    .sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
+
+  let originalCapitalInvested = 0;
+  let additionalCapitalAdded = 0;
+  if (capitalInTxs.length > 0) {
+    const initialIndex = capitalInTxs.findIndex((t) => /initial/i.test(t.notes || ''));
+    const initialTx = initialIndex >= 0 ? capitalInTxs[initialIndex] : capitalInTxs[0];
+    originalCapitalInvested = Number(initialTx.amount || 0);
+    const initialId = String(initialTx._id);
+    for (const tx of capitalInTxs) {
+      if (String(tx._id) !== initialId) {
+        additionalCapitalAdded += Number(tx.amount || 0);
+      }
+    }
+  }
+
+  const totalCapitalAdded = Math.round((originalCapitalInvested + additionalCapitalAdded) * 100) / 100;
+  const totalCapitalReturned = Math.round(
+    ownerTx.filter((t) => t.transactionType === 'CAPITAL_RETURNED').reduce((s, t) => s + Number(t.amount || 0), 0) * 100
+  ) / 100;
+  const profitTransferredToCapital = Math.round(
+    ownerTx.filter((t) => t.transactionType === 'OWNER_PROFIT_TO_CAPITAL').reduce((s, t) => s + Number(t.amount || 0), 0) * 100
+  ) / 100;
+  const totalCapitalInjected = Math.round((totalCapitalAdded + profitTransferredToCapital) * 100) / 100;
+  const capitalHeld = Math.round((totalCapitalInjected - totalCapitalReturned) * 100) / 100;
+
+  // Chronological FIFO breakdown for Owner
+  const sortedOwnerTxs = ownerTx
+    .filter((t) => ['CAPITAL_IN', 'CAPITAL_RETURNED', 'OWNER_PROFIT_TO_CAPITAL'].includes(t.transactionType))
+    .sort((a, b) => {
+      const da = a.transactionDate ? new Date(a.transactionDate).toISOString().slice(0, 10) : '';
+      const db = b.transactionDate ? new Date(b.transactionDate).toISOString().slice(0, 10) : '';
+      if (da !== db) return da.localeCompare(db);
+      return new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime();
+    });
+
+  const ownerLots = [];
+  for (const tx of sortedOwnerTxs) {
+    const amt = Number(tx.amount || 0);
+    if (amt <= 0) continue;
+    if (tx.transactionType === 'CAPITAL_IN') {
+      ownerLots.push({ type: 'DIRECT', remaining: amt });
+    } else if (tx.transactionType === 'OWNER_PROFIT_TO_CAPITAL') {
+      ownerLots.push({ type: 'PROFIT', remaining: amt });
+    } else if (tx.transactionType === 'CAPITAL_RETURNED') {
+      let toDeduct = amt;
+      for (const lot of ownerLots) {
+        if (toDeduct <= 0) break;
+        if (lot.remaining <= 0) continue;
+        const take = Math.min(lot.remaining, toDeduct);
+        lot.remaining = Math.round((lot.remaining - take) * 100) / 100;
+        toDeduct = Math.round((toDeduct - take) * 100) / 100;
+      }
+    }
+  }
+
+  const remainingDirectCapital = Math.round(
+    ownerLots.filter((l) => l.type === 'DIRECT').reduce((sum, l) => sum + l.remaining, 0) * 100
+  ) / 100;
+  const remainingProfitTransferred = Math.round(
+    ownerLots.filter((l) => l.type === 'PROFIT').reduce((sum, l) => sum + l.remaining, 0) * 100
+  ) / 100;
+
+  const ownerAllocs = (ownerAllocations || []).filter((a) => a.sourceType === 'OWNER');
+  const capitalDeployed = ownerAllocs.reduce((sum, a) => sum + Number(a.amount || 0), 0);
+  const capitalStillDeployed = cached?.capital?.capitalStillDeployed !== undefined
+    ? cached.capital.capitalStillDeployed
+    : capitalDeployed;
+  const capitalAvailable = Math.max(0, Math.round((capitalHeld - capitalStillDeployed) * 100) / 100);
+
+  // Profit movements
+  const totalOwnerCashWithdrawn = Math.round(
+    ownerTx.filter((t) => t.transactionType === 'OWNER_WITHDRAWAL').reduce((s, t) => s + Number(t.amount || 0), 0) * 100
+  ) / 100;
+  const totalOwnerProfitToCapital = profitTransferredToCapital;
+  const totalOwnerWithdrawn = Math.round((totalOwnerCashWithdrawn + totalOwnerProfitToCapital) * 100) / 100;
+  const totalOwnerProfit = cached?.profit?.totalOwnerProfit || totalOwnerWithdrawn;
+  const totalOwnerRemaining = Math.max(0, Math.round((totalOwnerProfit - totalOwnerWithdrawn) * 100) / 100);
+
+  const derivedCapital = {
+    ...(cached?.capital || {}),
+    originalCapitalInvested,
+    additionalCapitalAdded,
+    totalCapitalAdded,
+    totalCapitalReturned,
+    totalCapitalInjected,
+    capitalHeld,
+    capitalDeployed,
+    capitalStillDeployed,
+    capitalAvailable,
+    remainingDirectCapital,
+    remainingProfitTransferred,
+  };
+
+  const derivedProfit = {
+    ...(cached?.profit || {}),
+    totalOwnerProfit,
+    totalOwnerCashWithdrawn,
+    totalOwnerProfitToCapital,
+    totalOwnerWithdrawn,
+    totalOwnerRemaining,
+  };
+
+  return {
+    profit: derivedProfit,
+    capital: derivedCapital,
+    fundedSummary: cached?.fundedSummary || null,
+  };
 }
 
 export async function setOwnerDataOffline(ownerData) {
   return setMetadata('ownerData', ownerData);
+}
+
+export async function recordOfflineOwnerTransaction({ transactionType, amount, transactionDate, notes }) {
+  const numAmount = Number(amount);
+  if (!(numAmount > 0)) {
+    throw new Error('Amount must be greater than 0.');
+  }
+
+  let normalizedType = transactionType;
+  if (transactionType === 'PROFIT_CASH_WITHDRAWAL') normalizedType = 'OWNER_WITHDRAWAL';
+  if (transactionType === 'PROFIT_TO_CAPITAL') normalizedType = 'OWNER_PROFIT_TO_CAPITAL';
+
+  const operationId = 'op_owner_tx_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+  const now = new Date().toISOString();
+  const txDate = transactionDate ? new Date(transactionDate).toISOString() : now;
+
+  const localTx = {
+    _id: 'local_' + operationId,
+    transactionType: normalizedType,
+    amount: numAmount,
+    transactionDate: txDate,
+    notes: notes || '',
+    operationId,
+    createdAt: now,
+  };
+
+  // 1. Put into ownerTransactions store
+  await put('ownerTransactions', localTx);
+
+  // 2. Enqueue mutation into syncQueue
+  await enqueueOperation({
+    operationId,
+    type: 'ADD_OWNER_TRANSACTION',
+    payload: {
+      transactionType: normalizedType,
+      amount: numAmount,
+      transactionDate: txDate,
+      notes: notes || '',
+    },
+  });
+
+  // 3. Recalculate Owner Data and save to syncMetadata
+  const updatedOwnerData = await getOwnerDataOffline();
+  if (updatedOwnerData) {
+    await setOwnerDataOffline(updatedOwnerData);
+  }
+
+  return { transaction: localTx, ownerData: updatedOwnerData };
+}
+
+export async function recordOfflineInvestorTransaction({ investorId, transactionType, amount, transactionDate, notes }) {
+  const numAmount = Number(amount);
+  if (!(numAmount > 0)) {
+    throw new Error('Amount must be greater than 0.');
+  }
+
+  let normalizedType = transactionType;
+  if (transactionType === 'PROFIT_CASH_WITHDRAWAL') normalizedType = 'PROFIT_WITHDRAWAL';
+
+  const operationId = 'op_tx_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+  const now = new Date().toISOString();
+  const txDate = transactionDate ? new Date(transactionDate).toISOString() : now;
+
+  const localTx = {
+    _id: 'local_' + operationId,
+    investorId,
+    transactionType: normalizedType,
+    amount: numAmount,
+    transactionDate: txDate,
+    notes: notes || '',
+    operationId,
+    createdAt: now,
+  };
+
+  // 1. Put into investorTransactions store
+  await put('investorTransactions', localTx);
+
+  // 2. Enqueue mutation into syncQueue
+  await enqueueOperation({
+    operationId,
+    type: 'ADD_INVESTOR_TRANSACTION',
+    payload: {
+      investorId,
+      transactionType: normalizedType,
+      amount: numAmount,
+      transactionDate: txDate,
+      notes: notes || '',
+    },
+  });
+
+  // 3. Recalculate investor data
+  const updatedInvestor = await getInvestorOffline(investorId);
+  if (updatedInvestor) {
+    const cachedSummaries = (await getMetadata('cachedInvestorSummaries')) || {};
+    cachedSummaries[String(investorId)] = updatedInvestor;
+    await setMetadata('cachedInvestorSummaries', cachedSummaries);
+  }
+
+  return { transaction: localTx, data: updatedInvestor };
 }
 
 export async function getInvestorOffline(id) {
@@ -559,7 +780,7 @@ export async function getInvestorOffline(id) {
   const invIdStr = String(investor._id);
   const cached = cachedSummaries[id] || cachedSummaries[String(id)] || cachedSummaries[invIdStr];
 
-  // Derive metrics locally from IndexedDB tables if cached summary is absent
+  // Derive metrics locally from IndexedDB tables
   const [allTx, allPlans] = await Promise.all([
     getAll('investorTransactions'),
     getAll('installmentPlans'),
@@ -568,12 +789,34 @@ export async function getInvestorOffline(id) {
   const invTx = (allTx || []).filter((t) => String(t.investorId?._id || t.investorId) === invIdStr);
   const invPlans = (allPlans || []).filter((p) => !p.isDeleted && String(p.investorId?._id || p.investorId) === invIdStr);
 
-  const invested = invTx.filter((t) => t.transactionType === 'INVESTMENT_IN').reduce((sum, t) => sum + Number(t.amount || 0), 0);
-  const returned = invTx.filter((t) => t.transactionType === 'RETURN_TO_INVESTOR').reduce((sum, t) => sum + Number(t.amount || 0), 0);
-  const profitToCapital = invTx.filter((t) => t.transactionType === 'PROFIT_TO_CAPITAL').reduce((sum, t) => sum + Number(t.amount || 0), 0);
-  const held = (invested + profitToCapital) - returned;
+  const investmentInTxs = invTx
+    .filter((t) => t.transactionType === 'INVESTMENT_IN')
+    .sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
+
+  let originalCapitalInvested = 0;
+  let additionalCapitalAdded = 0;
+  if (investmentInTxs.length > 0) {
+    const initialIndex = investmentInTxs.findIndex((t) => /initial/i.test(t.notes || ''));
+    const initialTx = initialIndex >= 0 ? investmentInTxs[initialIndex] : investmentInTxs[0];
+    originalCapitalInvested = Number(initialTx.amount || 0);
+    const initialId = String(initialTx._id);
+    for (const tx of investmentInTxs) {
+      if (String(tx._id) !== initialId) {
+        additionalCapitalAdded += Number(tx.amount || 0);
+      }
+    }
+  }
+
+  const totalCapitalAdded = Math.round((originalCapitalInvested + additionalCapitalAdded) * 100) / 100;
+  const returned = Math.round(
+    invTx.filter((t) => t.transactionType === 'RETURN_TO_INVESTOR').reduce((sum, t) => sum + Number(t.amount || 0), 0) * 100
+  ) / 100;
+  const profitToCapital = Math.round(
+    invTx.filter((t) => t.transactionType === 'PROFIT_TO_CAPITAL').reduce((sum, t) => sum + Number(t.amount || 0), 0) * 100
+  ) / 100;
+  const held = Math.round(((totalCapitalAdded + profitToCapital) - returned) * 100) / 100;
   const deployed = invPlans.reduce((sum, p) => sum + Number(p.capitalDeployed || p.purchaseCost || 0), 0);
-  const available = Math.max(0, held - deployed);
+  const available = Math.max(0, Math.round((held - deployed) * 100) / 100);
 
   // Chronological FIFO breakdown of remaining capital held
   const sortedInvTx = [...invTx]
@@ -612,8 +855,9 @@ export async function getInvestorOffline(id) {
     contractsFunded: invPlans.length,
     customerCollections: invPlans.reduce((sum, p) => sum + Number(p.totalPaid || 0) + Number(p.downPayment || 0), 0),
     outstanding: invPlans.reduce((sum, p) => sum + Number(p.remainingAmount || 0), 0),
-    originalCapitalInvested: invested,
-    additionalCapitalAdded: 0,
+    originalCapitalInvested,
+    additionalCapitalAdded,
+    totalCapitalAdded,
     totalCapitalReturned: returned,
     capitalDeployed: deployed,
     recoveredCapital: 0,
@@ -633,18 +877,33 @@ export async function getInvestorOffline(id) {
     PARTIAL: 0,
   };
 
-  const defaultProfit = {
-    investorProfitShare: 0,
-    investorProfitCashWithdrawn: 0,
-    investorProfitToCapital: 0,
-    investorRemainingProfit: 0,
+  // Derive profit movements from local transactions
+  const profitWithdrawn = Math.round(
+    invTx.filter((t) => t.transactionType === 'PROFIT_WITHDRAWAL').reduce((sum, t) => sum + Number(t.amount || 0), 0) * 100
+  ) / 100;
+  const profitShare = cached?.profit?.investorProfitShare ?? (profitWithdrawn + profitToCapital);
+  const derivedProfit = {
+    investorProfitShare: profitShare,
+    investorProfitCashWithdrawn: profitWithdrawn,
+    investorProfitToCapital: profitToCapital,
+    investorRemainingProfit: Math.max(0, Math.round((profitShare - (profitWithdrawn + profitToCapital)) * 100) / 100),
+  };
+
+  const finalCapital = {
+    ...(cached?.capital || {}),
+    ...derivedCapital,
+  };
+
+  const finalProfit = {
+    ...(cached?.profit || {}),
+    ...derivedProfit,
   };
 
   return {
     investor: cached?.investor || investor,
-    capital: cached?.capital || derivedCapital,
+    capital: finalCapital,
     installmentStats: cached?.installmentStats || defaultInstallmentStats,
-    profit: cached?.profit || defaultProfit,
+    profit: finalProfit,
   };
 }
 
