@@ -2,6 +2,8 @@ import { useState, useMemo } from 'react';
 import toast from 'react-hot-toast';
 import { ownerApi } from '../../api/services';
 import { formatCurrency } from '../../utils/format';
+import { recordOfflineOwnerTransaction } from '../../offline/db';
+import { refreshPendingCount } from '../../offline/syncManager';
 
 /**
  * Unified Owner Transaction Modal
@@ -80,6 +82,27 @@ export default function OwnerTransactionModal({ capital, profit, defaultType, on
 
     setSaving(true);
     try {
+      if (!navigator.onLine) {
+        await recordOfflineOwnerTransaction({
+          transactionType,
+          amount: numAmount,
+          transactionDate,
+          notes,
+        });
+        await refreshPendingCount();
+        const successMsg =
+          transactionType === 'CAPITAL_IN'
+            ? 'Owner capital added offline. Will sync automatically.'
+            : transactionType === 'CAPITAL_RETURNED'
+            ? 'Owner capital return recorded offline. Will sync automatically.'
+            : transactionType === 'PROFIT_TO_CAPITAL'
+            ? 'Owner profit transferred to capital offline. Will sync automatically.'
+            : 'Owner cash profit withdrawal recorded offline. Will sync automatically.';
+        toast.success(successMsg);
+        if (typeof onSuccess === 'function') onSuccess();
+        return;
+      }
+
       if (transactionType === 'PROFIT_CASH_WITHDRAWAL' || transactionType === 'PROFIT_TO_CAPITAL') {
         await ownerApi.profitTransaction({
           transactionType,
@@ -105,6 +128,23 @@ export default function OwnerTransactionModal({ capital, profit, defaultType, on
       }
       if (typeof onSuccess === 'function') onSuccess();
     } catch (err) {
+      if (!err.response && (err.message === 'Network Error' || err.code === 'ERR_NETWORK')) {
+        try {
+          await recordOfflineOwnerTransaction({
+            transactionType,
+            amount: numAmount,
+            transactionDate,
+            notes,
+          });
+          await refreshPendingCount();
+          toast.success('Network offline: Owner transaction queued locally.');
+          if (typeof onSuccess === 'function') onSuccess();
+          return;
+        } catch (innerErr) {
+          toast.error(innerErr.message || 'Offline save failed.');
+          return;
+        }
+      }
       toast.error(err.response?.data?.message || 'Transaction failed.');
     } finally {
       setSaving(false);

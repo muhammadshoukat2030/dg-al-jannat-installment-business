@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import toast from 'react-hot-toast';
 import { investorApi } from '../../api/services';
 import { formatCurrency } from '../../utils/format';
-import { put, enqueueOperation } from '../../offline/db';
+import { recordOfflineInvestorTransaction } from '../../offline/db';
 import { refreshPendingCount } from '../../offline/syncManager';
 
 /**
@@ -83,29 +83,24 @@ export default function TransactionModal({ investor, capital, profit, defaultTyp
 
     setSaving(true);
     try {
-      if (!navigator.onLine && (transactionType === 'INVESTMENT_IN' || transactionType === 'RETURN_TO_INVESTOR')) {
-        const operationId = 'op_tx_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-        const localTx = {
-          _id: 'local_' + operationId,
+      if (!navigator.onLine) {
+        await recordOfflineInvestorTransaction({
           investorId: investor._id,
           transactionType,
           amount: numAmount,
-          transactionDate: transactionDate || new Date().toISOString(),
+          transactionDate,
           notes,
-          operationId,
-        };
-        await put('investorTransactions', localTx);
-        await enqueueOperation({
-          operationId,
-          type: 'ADD_INVESTOR_TRANSACTION',
-          payload: { investorId: investor._id, transactionType, amount: numAmount, transactionDate, notes },
         });
         await refreshPendingCount();
-        toast.success(
+        const successMsg =
           transactionType === 'INVESTMENT_IN'
             ? 'Capital added offline. Will sync automatically.'
-            : 'Capital return recorded offline. Will sync automatically.'
-        );
+            : transactionType === 'RETURN_TO_INVESTOR'
+            ? 'Capital return recorded offline. Will sync automatically.'
+            : transactionType === 'PROFIT_TO_CAPITAL'
+            ? 'Profit transferred to capital offline. Will sync automatically.'
+            : 'Cash profit withdrawal recorded offline. Will sync automatically.';
+        toast.success(successMsg);
         if (typeof onSuccess === 'function') onSuccess();
         return;
       }
@@ -135,6 +130,24 @@ export default function TransactionModal({ investor, capital, profit, defaultTyp
       }
       if (typeof onSuccess === 'function') onSuccess();
     } catch (err) {
+      if (!err.response && (err.message === 'Network Error' || err.code === 'ERR_NETWORK')) {
+        try {
+          await recordOfflineInvestorTransaction({
+            investorId: investor._id,
+            transactionType,
+            amount: numAmount,
+            transactionDate,
+            notes,
+          });
+          await refreshPendingCount();
+          toast.success('Network offline: Transaction queued locally.');
+          if (typeof onSuccess === 'function') onSuccess();
+          return;
+        } catch (innerErr) {
+          toast.error(innerErr.message || 'Offline save failed.');
+          return;
+        }
+      }
       toast.error(err.response?.data?.message || 'Transaction failed.');
     } finally {
       setSaving(false);

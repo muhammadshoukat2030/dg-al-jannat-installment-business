@@ -46,13 +46,14 @@ const getCapital = asyncHandler(async (req, res) => {
  * accountingService.recordOwnerCapitalTransaction, never trusted from the client.
  */
 const addCapitalTransaction = asyncHandler(async (req, res) => {
-  const { transactionType, amount, transactionDate, notes } = req.body;
+  const { transactionType, amount, transactionDate, notes, operationId } = req.body;
   try {
     const result = await accountingService.recordOwnerCapitalTransaction({
       transactionType,
       amount: Number(amount),
       transactionDate,
       notes,
+      operationId,
     });
     res.status(201).json({ success: true, data: result });
   } catch (err) {
@@ -61,7 +62,7 @@ const addCapitalTransaction = asyncHandler(async (req, res) => {
 });
 
 const ownerProfitTransaction = asyncHandler(async (req, res) => {
-  const { transactionType, amount, transactionDate, notes } = req.body;
+  const { transactionType, amount, transactionDate, notes, operationId } = req.body;
   const numAmount = Number(amount);
   if (!(numAmount > 0) || !Number.isFinite(numAmount)) {
     return res.status(400).json({ success: false, message: 'Amount must be greater than 0.' });
@@ -73,12 +74,14 @@ const ownerProfitTransaction = asyncHandler(async (req, res) => {
         amount: numAmount,
         date: transactionDate,
         notes,
+        operationId,
       });
     } else if (transactionType === 'PROFIT_TO_CAPITAL') {
       await accountingService.processOwnerProfitToCapital({
         amount: numAmount,
         date: transactionDate,
         notes,
+        operationId,
       });
     } else {
       return res.status(400).json({ success: false, message: 'Invalid profit transaction type.' });

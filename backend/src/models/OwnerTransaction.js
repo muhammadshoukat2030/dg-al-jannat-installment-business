@@ -24,6 +24,7 @@ const ownerTransactionSchema = new mongoose.Schema(
     investorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Investor', default: null }, // set for OWNER_PROFIT_SHARE — which investor's contract generated it
     planId: { type: mongoose.Schema.Types.ObjectId, ref: 'InstallmentPlan', default: null },
     withdrawalId: { type: mongoose.Schema.Types.ObjectId, ref: 'Withdrawal', default: null },
+    operationId: { type: String, sparse: true, unique: true },
     notes: { type: String, trim: true, default: '' },
   },
   { timestamps: true }
