@@ -27,7 +27,7 @@ async function getInvestorCapitalSummary(investorId) {
 
   const allocatedPlanIds = await FundingAllocation.distinct('planId');
 
-  const [txAgg, planAgg, allocAgg, investmentInTxs] = await Promise.all([
+  const [txAgg, planAgg, allocAgg, investmentInTxs, capitalTxs] = await Promise.all([
     InvestorTransaction.aggregate([
       { $match: { investorId: investorObjectId } },
       { $group: { _id: '$transactionType', total: { $sum: '$amount' } } },
@@ -60,6 +60,10 @@ async function getInvestorCapitalSummary(investorId) {
       investorId: investorObjectId,
       transactionType: 'INVESTMENT_IN',
     }).sort({ createdAt: 1 }),
+    InvestorTransaction.find({
+      investorId: investorObjectId,
+      transactionType: { $in: ['INVESTMENT_IN', 'PROFIT_TO_CAPITAL', 'RETURN_TO_INVESTOR'] },
+    }).sort({ transactionDate: 1, createdAt: 1 }).lean(),
   ]);
 
   let originalCapitalInvested = 0;
@@ -85,6 +89,41 @@ async function getInvestorCapitalSummary(investorId) {
 
   // Capital Held is total capital in business custody minus capital returned to investor
   const capitalHeld = Math.round((totalCapitalInjected - totalCapitalReturned) * 100) / 100;
+
+  // Chronological FIFO breakdown of remaining capital held
+  const sortedCapitalTxs = [...(capitalTxs || [])].sort((a, b) => {
+    const da = a.transactionDate ? new Date(a.transactionDate).toISOString().slice(0, 10) : '';
+    const db = b.transactionDate ? new Date(b.transactionDate).toISOString().slice(0, 10) : '';
+    if (da !== db) return da.localeCompare(db);
+    return new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime();
+  });
+
+  const capitalLots = [];
+  for (const tx of sortedCapitalTxs) {
+    const amt = Number(tx.amount || 0);
+    if (amt <= 0) continue;
+    if (tx.transactionType === 'INVESTMENT_IN') {
+      capitalLots.push({ type: 'DIRECT', remaining: amt });
+    } else if (tx.transactionType === 'PROFIT_TO_CAPITAL') {
+      capitalLots.push({ type: 'PROFIT', remaining: amt });
+    } else if (tx.transactionType === 'RETURN_TO_INVESTOR') {
+      let toDeduct = amt;
+      for (const lot of capitalLots) {
+        if (toDeduct <= 0) break;
+        if (lot.remaining <= 0) continue;
+        const take = Math.min(lot.remaining, toDeduct);
+        lot.remaining = Math.round((lot.remaining - take) * 100) / 100;
+        toDeduct = Math.round((toDeduct - take) * 100) / 100;
+      }
+    }
+  }
+
+  const remainingDirectCapital = Math.round(
+    capitalLots.filter((l) => l.type === 'DIRECT').reduce((sum, l) => sum + l.remaining, 0) * 100
+  ) / 100;
+  const remainingProfitTransferred = Math.round(
+    capitalLots.filter((l) => l.type === 'PROFIT').reduce((sum, l) => sum + l.remaining, 0) * 100
+  ) / 100;
 
   const planStats = planAgg[0] || {
     directCapitalDeployed: 0,
@@ -145,6 +184,8 @@ async function getInvestorCapitalSummary(investorId) {
     capitalStillDeployed,
     profitTransferredToCapital,
     profitReinvested: profitTransferredToCapital,
+    remainingDirectCapital,
+    remainingProfitTransferred,
     capitalAvailable,
     customersFunded: fundedCustomerIds.length,
     contractsFunded: planStats.contractCount,

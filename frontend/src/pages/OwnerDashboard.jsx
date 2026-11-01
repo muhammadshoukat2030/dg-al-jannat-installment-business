@@ -83,6 +83,22 @@ export default function OwnerDashboard() {
   if (loading && !profit) return <div className="p-8 text-center text-gray-400">Loading owner dashboard...</div>;
   if (!profit) return <div className="p-8 text-center text-gray-400">Owner data not available.</div>;
 
+  // Dynamic calculations for Owner Capital Overview (FIFO remaining allocation)
+  const capitalHeldTotal = Math.max(0, Number(capital?.capitalHeld || 0));
+
+  // Remaining profit transferred to capital (FIFO remaining balance, never negative, never exceeds capitalHeld)
+  const profitTransferred = capital?.remainingProfitTransferred !== undefined
+    ? Math.max(0, Number(capital.remainingProfitTransferred))
+    : Math.max(0, capitalHeldTotal - Math.max(0, Number(capital?.totalCapitalAdded || 0) - Number(capital?.totalCapitalReturned || 0)));
+
+  // Remaining direct capital (FIFO remaining balance, never negative, never exceeds capitalHeld)
+  const remainingCapital = capital?.remainingDirectCapital !== undefined
+    ? Math.max(0, Number(capital.remainingDirectCapital))
+    : Math.max(0, capitalHeldTotal - profitTransferred);
+
+  // TOTAL CAPITAL SUMMARY: strictly Profit Transferred to Capital + Remaining Owner Capital
+  const totalCapitalSummary = profitTransferred + remainingCapital;
+
   return (
     <div className="space-y-6">
       {isOffline && (
@@ -288,6 +304,68 @@ export default function OwnerDashboard() {
           <button className="btn-secondary !text-xs !py-1" onClick={() => ownerExportApi.summaryExcel().catch(() => toast.error('Export failed'))}>
             <Download className="w-3 h-3 inline mr-1" />Summary Excel
           </button>
+        </div>
+      </section>
+
+      {/* OWNER CAPITAL OVERVIEW CARD — EXACTLY 3 CARDS */}
+      <section className="card p-5 space-y-4 bg-white dark:bg-gray-800 shadow-sm border border-gray-100 dark:border-gray-700">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 border-b border-gray-100 dark:border-gray-700/80 pb-3">
+          <div>
+            <h2 className="text-base font-bold text-gray-900 dark:text-gray-100 tracking-wide uppercase">
+              OWNER CAPITAL OVERVIEW
+            </h2>
+            <p className="text-xs text-gray-500">
+              Consolidated summary of transferred profit and remaining owner capital.
+            </p>
+          </div>
+        </div>
+
+        {/* First two cards side by side on desktop */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* Card 1: Profit Transferred to Capital */}
+          <div className="p-4 rounded-xl bg-gray-50 dark:bg-gray-700/40 border border-gray-100 dark:border-gray-700">
+            <span className="text-xs font-medium text-gray-500 dark:text-gray-400 block">
+              Profit Transferred to Capital
+            </span>
+            <span className="text-lg sm:text-xl font-bold text-primary-600 dark:text-primary-400 mt-1 block">
+              {formatCurrency(profitTransferred)}
+            </span>
+          </div>
+
+          {/* Card 2: Remaining Owner Capital */}
+          <div className="p-4 rounded-xl bg-gray-50 dark:bg-gray-700/40 border border-gray-100 dark:border-gray-700">
+            <span className="text-xs font-medium text-gray-500 dark:text-gray-400 block">
+              Remaining Owner Capital
+            </span>
+            <span className="text-lg sm:text-xl font-bold text-emerald-600 dark:text-emerald-400 mt-1 block">
+              {formatCurrency(remainingCapital)}
+            </span>
+            <span className="text-[11px] text-gray-400 mt-0.5 block">
+              Held capital in business custody.
+            </span>
+          </div>
+        </div>
+
+        {/* Card 3: TOTAL CAPITAL SUMMARY (Prominently displayed below them) */}
+        <div className="p-4 sm:p-5 rounded-xl bg-gradient-to-r from-primary-500/10 via-indigo-500/10 to-emerald-500/10 border-2 border-primary-500/30 dark:border-primary-500/40 shadow-sm">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wider text-primary-800 dark:text-primary-300">
+                TOTAL CAPITAL SUMMARY
+              </p>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Profit Transferred to Capital + Remaining Owner Capital
+              </p>
+            </div>
+            <div className="sm:text-right">
+              <span className="text-2xl sm:text-3xl font-black text-gray-900 dark:text-white tracking-tight block">
+                {formatCurrency(totalCapitalSummary)}
+              </span>
+              <span className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5 block font-medium">
+                ({formatCurrency(profitTransferred)} + {formatCurrency(remainingCapital)})
+              </span>
+            </div>
+          </div>
         </div>
       </section>
 

@@ -426,7 +426,7 @@ async function processWithdrawal({ investorId, totalAmount, withdrawalDate, refe
  * NOT add to available capital (they were already treated as withdrawn profit, not reinvested).
  */
 async function getOwnerCapitalSummary() {
-  const [txAgg, capitalInTxs] = await Promise.all([
+  const [txAgg, capitalInTxs, allCapitalTxs] = await Promise.all([
     OwnerTransaction.aggregate([
       {
         $match: {
@@ -438,6 +438,9 @@ async function getOwnerCapitalSummary() {
     OwnerTransaction.find({
       transactionType: 'CAPITAL_IN',
     }).sort({ createdAt: 1 }),
+    OwnerTransaction.find({
+      transactionType: { $in: ['CAPITAL_IN', 'CAPITAL_RETURNED', 'OWNER_PROFIT_TO_CAPITAL'] },
+    }).sort({ transactionDate: 1, createdAt: 1 }).lean(),
   ]);
 
   let originalCapitalInvested = 0;
@@ -462,6 +465,41 @@ async function getOwnerCapitalSummary() {
 
   // Capital Held is total capital in business custody minus capital returned
   const capitalHeld = round2(totalCapitalInjected - totalCapitalReturned);
+
+  // Chronological FIFO breakdown of remaining owner capital held
+  const sortedOwnerTxs = [...(allCapitalTxs || [])].sort((a, b) => {
+    const da = a.transactionDate ? new Date(a.transactionDate).toISOString().slice(0, 10) : '';
+    const db = b.transactionDate ? new Date(b.transactionDate).toISOString().slice(0, 10) : '';
+    if (da !== db) return da.localeCompare(db);
+    return new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime();
+  });
+
+  const ownerLots = [];
+  for (const tx of sortedOwnerTxs) {
+    const amt = Number(tx.amount || 0);
+    if (amt <= 0) continue;
+    if (tx.transactionType === 'CAPITAL_IN') {
+      ownerLots.push({ type: 'DIRECT', remaining: amt });
+    } else if (tx.transactionType === 'OWNER_PROFIT_TO_CAPITAL') {
+      ownerLots.push({ type: 'PROFIT', remaining: amt });
+    } else if (tx.transactionType === 'CAPITAL_RETURNED') {
+      let toDeduct = amt;
+      for (const lot of ownerLots) {
+        if (toDeduct <= 0) break;
+        if (lot.remaining <= 0) continue;
+        const take = Math.min(lot.remaining, toDeduct);
+        lot.remaining = round2(lot.remaining - take);
+        toDeduct = round2(toDeduct - take);
+      }
+    }
+  }
+
+  const remainingDirectCapital = round2(
+    ownerLots.filter((l) => l.type === 'DIRECT').reduce((sum, l) => sum + l.remaining, 0)
+  );
+  const remainingProfitTransferred = round2(
+    ownerLots.filter((l) => l.type === 'PROFIT').reduce((sum, l) => sum + l.remaining, 0)
+  );
 
   const ownerAllocations = await FundingAllocation.find({ sourceType: 'OWNER' });
   const capitalDeployed = round2(ownerAllocations.reduce((sum, a) => sum + a.amount, 0));
@@ -494,6 +532,8 @@ async function getOwnerCapitalSummary() {
     capitalStillDeployed,
     profitTransferredToCapital,
     profitReinvested: profitTransferredToCapital,
+    remainingDirectCapital,
+    remainingProfitTransferred,
     capitalAvailable,
   };
 }

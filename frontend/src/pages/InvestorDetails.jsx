@@ -87,6 +87,25 @@ export default function InvestorDetails() {
   if (loading) return <div className="p-8 text-center text-gray-400">Loading...</div>;
   if (!investor) return <div className="p-8 text-center text-gray-400">Investor not found.</div>;
 
+  // Dynamic calculations for Investor Capital Overview & Capital Held card (FIFO remaining allocation)
+  const capitalHeldTotal = Math.max(0, Number(capital?.capitalHeld || 0));
+
+  // Remaining profit transferred to capital (FIFO remaining balance, never negative, never exceeds capitalHeld)
+  const profitTransferred = capital?.remainingProfitTransferred !== undefined
+    ? Math.max(0, Number(capital.remainingProfitTransferred))
+    : Math.max(0, capitalHeldTotal - Math.max(0, Number(capital?.totalCapitalAdded || 0) - Number(capital?.totalCapitalReturned || 0)));
+
+  // Remaining direct capital (FIFO remaining balance, never negative, never exceeds capitalHeld)
+  const remainingCapital = capital?.remainingDirectCapital !== undefined
+    ? Math.max(0, Number(capital.remainingDirectCapital))
+    : Math.max(0, capitalHeldTotal - profitTransferred);
+
+  // TOTAL CAPITAL SUMMARY: strictly Profit Transferred to Capital + Remaining Investor Capital
+  const totalCapitalSummary = profitTransferred + remainingCapital;
+
+  // Capital Held card calculation: matches actual active capital held in business custody
+  const updatedCapitalHeld = totalCapitalSummary;
+
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between flex-wrap gap-3 no-print">
@@ -284,9 +303,64 @@ export default function InvestorDetails() {
         </div>
       </section>
 
+      {/* INVESTOR CAPITAL OVERVIEW CARD — EXACTLY 3 CARDS */}
+      <section className="card p-5 space-y-4 bg-white dark:bg-gray-800 shadow-sm border border-gray-100 dark:border-gray-700">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 border-b border-gray-100 dark:border-gray-700/80 pb-3">
+          <div>
+            <h2 className="text-base font-bold text-gray-900 dark:text-gray-100 tracking-wide uppercase">
+              INVESTOR CAPITAL OVERVIEW
+            </h2>
+            <p className="text-xs text-gray-500">
+              Consolidated summary of transferred profit and remaining investor capital.
+            </p>
+          </div>
+        </div>
+
+        {/* Exactly 3 Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {/* Card 1: Profit Transferred to Capital */}
+          <div className="p-4 rounded-xl bg-gray-50 dark:bg-gray-700/40 border border-gray-100 dark:border-gray-700">
+            <span className="text-xs font-medium text-gray-500 dark:text-gray-400 block">
+              Profit Transferred to Capital
+            </span>
+            <span className="text-lg sm:text-xl font-bold text-primary-600 dark:text-primary-400 mt-1 block">
+              {formatCurrency(profitTransferred)}
+            </span>
+          </div>
+
+          {/* Card 2: Remaining Investor Capital */}
+          <div className="p-4 rounded-xl bg-gray-50 dark:bg-gray-700/40 border border-gray-100 dark:border-gray-700">
+            <span className="text-xs font-medium text-gray-500 dark:text-gray-400 block">
+              Remaining Investor Capital
+            </span>
+            <span className="text-lg sm:text-xl font-bold text-emerald-600 dark:text-emerald-400 mt-1 block">
+              {formatCurrency(remainingCapital)}
+            </span>
+            <span className="text-[11px] text-gray-400 mt-0.5 block">
+              Held capital in business custody.
+            </span>
+          </div>
+
+          {/* Card 3: TOTAL CAPITAL SUMMARY (Visually prominent) */}
+          <div className="p-4 rounded-xl bg-gradient-to-br from-primary-500/10 via-indigo-500/10 to-emerald-500/10 border-2 border-primary-500/40 dark:border-primary-500/50 shadow-sm flex flex-col justify-between">
+            <div>
+              <span className="text-xs font-bold uppercase tracking-wider text-primary-800 dark:text-primary-300 block">
+                TOTAL CAPITAL SUMMARY
+              </span>
+              <span className="text-xl sm:text-2xl font-black text-gray-900 dark:text-white mt-1 block tracking-tight">
+                {formatCurrency(totalCapitalSummary)}
+              </span>
+            </div>
+            <span className="text-[11px] text-gray-500 dark:text-gray-400 mt-1 block font-medium">
+              ({formatCurrency(profitTransferred)} + {formatCurrency(remainingCapital)})
+            </span>
+          </div>
+        </div>
+      </section>
+
       {/* Operational stats cards */}
       <section className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        <SummaryCard label="Capital Held" value={formatCurrency(capital.capitalHeld)} tone="good" />
+        <SummaryCard label="Capital Held" value={formatCurrency(updatedCapitalHeld)} tone="good" />
         <SummaryCard label="Customers Funded" value={capital.customersFunded} />
         <SummaryCard label="Contracts Funded" value={capital.contractsFunded} />
         <SummaryCard label="Customer Collections" value={formatCurrency(capital.customerCollections)} tone="good" />
