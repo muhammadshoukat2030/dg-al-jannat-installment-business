@@ -1149,65 +1149,327 @@ export async function archiveCustomerOffline(customerId) {
 
 export async function getDashboardOffline() {
   const cached = await getMetadata('cachedDashboardSummary');
-  if (cached && typeof cached === 'object' && cached.totalCustomers !== undefined) {
-    return cached;
-  }
 
-  // Derive directly from local IndexedDB collections
-  const [plans, installments, payments, customers, investors] = await Promise.all([
+  // Load all local collections from IndexedDB
+  const [plans, installments, payments, customers, investors, allocations, invTxs] = await Promise.all([
     getAll('installmentPlans'),
     getAll('installments'),
     getAll('payments'),
     getAll('customers'),
     getAll('investors'),
+    getAll('fundingAllocations'),
+    getAll('investorTransactions'),
   ]);
 
-  const activePlans = plans.filter((p) => !p.isDeleted);
-  const activeCustomers = customers.filter((c) => !c.isDeleted);
-  const activeInvestors = investors.filter((i) => !i.isDeleted);
+  const activePlans = (plans || []).filter((p) => !p.isDeleted);
+  const nonArchivedCustomers = (customers || []).filter((c) => !c.isDeleted && !c.isArchived);
+  const activeInvestors = (investors || []).filter((i) => !i.isDeleted);
+  const allInst = installments || [];
+  const allPay = payments || [];
+  const allAlloc = allocations || [];
+  const allInvTx = invTxs || [];
 
-  const todayStr = new Date().toISOString().slice(0, 10);
-  const currentMonthStr = todayStr.slice(0, 7);
+  // 1. BUSINESS OVERVIEW
+  const activeContracts = activePlans.filter((p) => p.status === 'ACTIVE').length;
+  const completedContracts = activePlans.filter((p) => p.status === 'COMPLETED').length;
 
-  const todayPayments = payments.filter((p) => (p.paymentDate || p.createdAt || '').slice(0, 10) === todayStr);
-  const todayCollection = todayPayments.reduce((sum, p) => sum + (p.amount || 0), 0);
+  const activeCustomerIds = new Set(
+    activePlans
+      .filter((p) => p.status === 'ACTIVE')
+      .map((p) => String(p.customerId?._id || p.customerId))
+  );
 
-  const monthPayments = payments.filter((p) => (p.paymentDate || p.createdAt || '').slice(0, 7) === currentMonthStr);
-  const monthlyCollection = monthPayments.reduce((sum, p) => sum + (p.amount || 0), 0);
+  const completedCustomerIds = new Set(
+    activePlans
+      .filter((p) => p.status === 'COMPLETED')
+      .map((p) => String(p.customerId?._id || p.customerId))
+  );
 
-  const totalSales = activePlans.reduce((sum, p) => sum + (p.sellingPrice || p.totalAmount || 0), 0);
-  const totalReceived = payments.reduce((sum, p) => sum + (p.amount || 0), 0);
-  const totalRemaining = Math.max(0, totalSales - totalReceived);
+  const completedOnlyCount = [...completedCustomerIds].filter((id) => !activeCustomerIds.has(id)).length;
 
+  const derivedBusiness = {
+    totalCustomers: nonArchivedCustomers.length,
+    activeCustomers: activeCustomerIds.size,
+    completedCustomers: completedOnlyCount,
+    activeContracts,
+    completedContracts,
+  };
+
+  // 2. BUSINESS FINANCIALS
+  let totalSales = 0;
+  let totalProductCost = 0;
+  let totalCollected = 0;
+  let totalRemaining = 0;
+  let expectedProfit = 0;
+  let expectedLoss = 0;
+
+  for (const p of activePlans) {
+    totalSales += Number(p.sellingPrice || 0);
+    totalProductCost += Number(p.purchaseCost || 0);
+    const paid = Number(p.totalPaid || 0) + Number(p.downPayment || 0);
+    totalCollected += paid;
+    const rem = p.remainingAmount !== undefined
+      ? Number(p.remainingAmount || 0)
+      : Math.max(0, Number(p.sellingPrice || 0) - paid);
+    totalRemaining += rem;
+    expectedProfit += Number(p.expectedProfit || 0);
+    expectedLoss += Number(p.expectedLoss || 0);
+  }
+
+  totalSales = Math.round(totalSales * 100) / 100;
+  totalProductCost = Math.round(totalProductCost * 100) / 100;
+  totalCollected = Math.round(totalCollected * 100) / 100;
+  totalRemaining = Math.round(totalRemaining * 100) / 100;
+  expectedProfit = Math.round(expectedProfit * 100) / 100;
+  expectedLoss = Math.round(expectedLoss * 100) / 100;
+  const netExpectedProfit = Math.round((expectedProfit - expectedLoss) * 100) / 100;
+
+  const derivedFinancial = {
+    totalSales,
+    totalProductCost,
+    totalCollected,
+    totalRemaining,
+    expectedProfit,
+    expectedLoss,
+    netExpectedProfit,
+  };
+
+  // 3. INSTALLMENT OVERVIEW
+  const byStatus = { PAID: 0, PARTIAL: 0, PENDING: 0, MISSED: 0, OVERDUE: 0 };
+  let missedAmount = 0;
+  let overdueAmount = 0;
   const todayDate = new Date();
   todayDate.setHours(0, 0, 0, 0);
-  const overdueInstallments = installments.filter((inst) => {
-    if (inst.status === 'PAID') return false;
-    const due = new Date(inst.dueDate);
-    return due < todayDate;
+
+  for (const inst of allInst) {
+    let status = inst.status || 'PENDING';
+    if (status !== 'PAID') {
+      const due = new Date(inst.dueDate);
+      if (due < todayDate && status !== 'MISSED') {
+        status = 'OVERDUE';
+      }
+    }
+
+    if (byStatus[status] !== undefined) {
+      byStatus[status] += 1;
+    }
+
+    const amtDue = Number(inst.amountDue || 0);
+    const paidAmt = Number(inst.paidAmount || 0);
+    const diff = Math.max(0, amtDue - paidAmt);
+
+    if (status === 'MISSED') {
+      missedAmount += diff;
+    } else if (status === 'OVERDUE') {
+      overdueAmount += diff;
+    }
+  }
+
+  const derivedInstallments = {
+    paid: byStatus.PAID,
+    partial: byStatus.PARTIAL,
+    pending: byStatus.PENDING,
+    missed: byStatus.MISSED,
+    overdue: byStatus.OVERDUE,
+    missedAmount: Math.round(missedAmount * 100) / 100,
+    overdueAmount: Math.round(overdueAmount * 100) / 100,
+  };
+
+  // 4. COLLECTION OVERVIEW
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const weekStart = new Date(todayStart);
+  weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const yearStart = new Date(now.getFullYear(), 0, 1);
+
+  let todayCol = 0;
+  let weekCol = 0;
+  let monthCol = 0;
+  let yearCol = 0;
+
+  for (const pay of allPay) {
+    const pDate = new Date(pay.paymentDate || pay.createdAt || 0);
+    const amt = Number(pay.amount || 0);
+    if (pDate >= todayStart) todayCol += amt;
+    if (pDate >= weekStart) weekCol += amt;
+    if (pDate >= monthStart) monthCol += amt;
+    if (pDate >= yearStart) yearCol += amt;
+  }
+
+  const derivedCollection = {
+    today: Math.round(todayCol * 100) / 100,
+    thisWeek: Math.round(weekCol * 100) / 100,
+    thisMonth: Math.round(monthCol * 100) / 100,
+    thisYear: Math.round(yearCol * 100) / 100,
+  };
+
+  // 5. PROFIT VS LOSS
+  let profitable = 0;
+  let loss = 0;
+  let breakEven = 0;
+  let totalProfit = 0;
+  let totalLoss = 0;
+
+  for (const p of activePlans) {
+    const ep = Number(p.expectedProfit || 0);
+    const el = Number(p.expectedLoss || 0);
+    if (ep > 0) {
+      profitable += 1;
+      totalProfit += ep;
+    } else if (el > 0) {
+      loss += 1;
+      totalLoss += el;
+    } else {
+      breakEven += 1;
+    }
+  }
+
+  const derivedProfitLoss = {
+    profitableContracts: profitable,
+    lossContracts: loss,
+    breakEvenContracts: breakEven,
+    totalProfit: Math.round(totalProfit * 100) / 100,
+    totalLoss: Math.round(totalLoss * 100) / 100,
+    netProfit: Math.round((totalProfit - totalLoss) * 100) / 100,
+  };
+
+  // 6. INVESTOR OVERVIEW
+  const totalInvested = allInvTx
+    .filter((t) => t.transactionType === 'INVESTMENT_IN')
+    .reduce((sum, t) => sum + Number(t.amount || 0), 0);
+  const totalReturned = allInvTx
+    .filter((t) => t.transactionType === 'RETURN_TO_INVESTOR')
+    .reduce((sum, t) => sum + Number(t.amount || 0), 0);
+  const profitToCapital = allInvTx
+    .filter((t) => t.transactionType === 'PROFIT_TO_CAPITAL')
+    .reduce((sum, t) => sum + Number(t.amount || 0), 0);
+  const totalProfitReinvested = Math.round(profitToCapital * 100) / 100;
+  const totalCapitalInjected = Math.round((totalInvested + totalProfitReinvested) * 100) / 100;
+  const capitalHeld = Math.round((totalCapitalInjected - totalReturned) * 100) / 100;
+
+  const investorAllocs = allAlloc.filter((a) => a.sourceType === 'INVESTOR');
+  const allocatedPlanIds = new Set(investorAllocs.map((a) => String(a.planId?._id || a.planId)));
+  const legacyInvestorPlans = activePlans.filter(
+    (p) => p.fundingSource === 'INVESTOR' && !allocatedPlanIds.has(String(p._id))
+  );
+
+  let totalDeployedPaisa = investorAllocs.reduce((sum, a) => sum + Math.round(Number(a.amount || 0) * 100), 0);
+  legacyInvestorPlans.forEach((p) => {
+    totalDeployedPaisa += Math.round(Number(p.capitalDeployed || p.purchaseCost || 0) * 100);
   });
+  const totalCapitalDeployed = totalDeployedPaisa / 100;
 
-  const totalOutstanding = activePlans.reduce((sum, plan) => {
-    if (plan.remainingAmount !== undefined) return sum + (plan.remainingAmount || 0);
-    const planPayments = payments.filter((p) => String(p.planId) === String(plan._id));
-    const paid = planPayments.reduce((s, p) => s + (p.amount || 0), 0);
-    return sum + Math.max(0, (plan.sellingPrice || plan.totalAmount || 0) - paid);
-  }, 0);
+  const allInvestorPlanIds = new Set([
+    ...investorAllocs.map((a) => String(a.planId?._id || a.planId)),
+    ...legacyInvestorPlans.map((p) => String(p._id)),
+    ...activePlans.filter((p) => p.investorId).map((p) => String(p._id)),
+  ]);
 
+  const cachedInv = cached?.investorOverview || (await getMetadata('cachedInvestorOverview'));
+  const totalRecoveredCapital = cachedInv?.totalRecoveredCapital !== undefined
+    ? Number(cachedInv.totalRecoveredCapital || 0)
+    : 0;
+  const totalCapitalStillDeployed = Math.max(0, Math.round((totalCapitalDeployed - totalRecoveredCapital) * 100) / 100);
+  const totalCapitalAvailable = Math.max(0, Math.round((capitalHeld - totalCapitalStillDeployed) * 100) / 100);
+
+  const derivedInvestorOverview = {
+    totalInvestors: activeInvestors.length,
+    totalCapitalReceived: Math.round(totalInvested * 100) / 100,
+    totalCapitalReturned: Math.round(totalReturned * 100) / 100,
+    totalCapitalHeld: capitalHeld,
+    totalCapitalDeployed: Math.round(totalCapitalDeployed * 100) / 100,
+    totalRecoveredCapital,
+    totalCapitalStillDeployed,
+    totalProfitReinvested,
+    totalCapitalAvailable,
+    contractsFunded: allInvestorPlanIds.size,
+  };
+
+  // 7. LISTS
+  const customerMap = new Map();
+  (customers || []).forEach((c) => customerMap.set(String(c._id), c));
+
+  const sortedPayments = [...allPay]
+    .sort((a, b) => new Date(b.paymentDate || b.createdAt || 0) - new Date(a.paymentDate || a.createdAt || 0))
+    .slice(0, 10)
+    .map((p) => ({
+      ...p,
+      customerId: customerMap.get(String(p.customerId?._id || p.customerId)) || p.customerId,
+    }));
+
+  const sortedCustomers = [...nonArchivedCustomers]
+    .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+    .slice(0, 10);
+
+  const topOutstanding = [...activePlans]
+    .filter((p) => Number(p.remainingAmount || 0) > 0)
+    .sort((a, b) => Number(b.remainingAmount || 0) - Number(a.remainingAmount || 0))
+    .slice(0, 10)
+    .map((p) => ({
+      customer: customerMap.get(String(p.customerId?._id || p.customerId)) || p.customerId,
+      planId: p._id,
+      contractId: p.contractId,
+      sellingPrice: p.sellingPrice,
+      paid: p.totalPaid,
+      remaining: p.remainingAmount,
+    }));
+
+  const overdueCustomers = allInst
+    .filter((i) => {
+      if (i.status === 'PAID') return false;
+      const due = new Date(i.dueDate);
+      return due < todayDate;
+    })
+    .sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate))
+    .slice(0, 20)
+    .map((i) => {
+      const p = activePlans.find((plan) => String(plan._id) === String(i.planId?._id || i.planId));
+      const cust = customerMap.get(String(i.customerId?._id || i.customerId || p?.customerId?._id || p?.customerId));
+      const daysOverdue = Math.max(0, Math.floor((todayDate - new Date(i.dueDate)) / (1000 * 60 * 60 * 24)));
+      return {
+        customer: cust || { name: 'Customer' },
+        contract: p,
+        installmentNumber: i.installmentNumber,
+        dueDate: i.dueDate,
+        amountDue: i.amountDue,
+        paid: i.paidAmount,
+        remaining: Math.max(0, Number(i.amountDue || 0) - Number(i.paidAmount || 0)),
+        daysOverdue,
+      };
+    });
+
+  // Construct complete structured offline dashboard object
+  // Overlay: If server cache exists, merge server values with fresh local calculations
   return {
-    totalCustomers: activeCustomers.length,
-    totalSales,
-    totalReceived,
-    totalRemaining,
-    todayCollection,
-    monthlyCollection,
-    totalOutstanding,
-    overdueCount: overdueInstallments.length,
-    recentPayments: payments.slice(0, 10),
-    recentCustomers: activeCustomers.slice(0, 10),
-    investorOverview: {
-      totalInvestors: activeInvestors.length,
-      totalCapital: 0,
+    business: {
+      ...(cached?.business || {}),
+      ...derivedBusiness,
     },
+    financial: {
+      ...(cached?.financial || {}),
+      ...derivedFinancial,
+    },
+    collection: {
+      ...(cached?.collection || {}),
+      ...derivedCollection,
+    },
+    installments: {
+      ...(cached?.installments || {}),
+      ...derivedInstallments,
+    },
+    profitLoss: {
+      ...(cached?.profitLoss || {}),
+      ...derivedProfitLoss,
+    },
+    investorOverview: {
+      ...(cached?.investorOverview || {}),
+      ...derivedInvestorOverview,
+    },
+    topInvestors: cached?.topInvestors || [],
+    topOutstanding: topOutstanding.length > 0 ? topOutstanding : (cached?.topOutstanding || []),
+    overdueCustomers: overdueCustomers.length > 0 ? overdueCustomers : (cached?.overdueCustomers || []),
+    recentPayments: sortedPayments.length > 0 ? sortedPayments : (cached?.recentPayments || []),
+    recentCustomers: sortedCustomers.length > 0 ? sortedCustomers : (cached?.recentCustomers || []),
   };
 }

@@ -18,7 +18,7 @@ import { useTheme } from '../context/ThemeContext';
 import { formatCurrency, formatDate } from '../utils/format';
 import StatCard from '../components/dashboard/StatCard';
 import StatusBadge from '../components/common/StatusBadge';
-import { getMetadata, getDashboardOffline } from '../offline/db';
+import { getMetadata, setMetadata, getDashboardOffline, getOwnerDataOffline } from '../offline/db';
 
 export default function Dashboard() {
   const { theme } = useTheme();
@@ -42,7 +42,7 @@ export default function Dashboard() {
       })
       .catch(() => {});
 
-    getMetadata('ownerData')
+    getOwnerDataOffline()
       .then((ownerData) => {
         if (ownerData?.profit && isMounted) {
           setOwnerProfit(ownerData.profit);
@@ -58,9 +58,13 @@ export default function Dashboard() {
           if (summaryRes?.data?.data) {
             setData(summaryRes.data.data);
             setIsOfflineCache(false);
+            setMetadata('cachedDashboardSummary', summaryRes.data.data).catch(() => {});
           }
           if (ownerRes?.data?.data) {
             setOwnerProfit(ownerRes.data.data);
+            getMetadata('ownerData').then((od) => {
+              setMetadata('ownerData', { ...(od || {}), profit: ownerRes.data.data }).catch(() => {});
+            }).catch(() => {});
           }
         })
         .catch(async () => {
@@ -87,6 +91,11 @@ export default function Dashboard() {
         }
         if (isMounted) setLoading(false);
       });
+      getOwnerDataOffline().then((ownerData) => {
+        if (ownerData?.profit && isMounted) {
+          setOwnerProfit(ownerData.profit);
+        }
+      });
     }
 
     return () => {
@@ -109,6 +118,16 @@ export default function Dashboard() {
   const overdueCustomers = Array.isArray(data.overdueCustomers) ? data.overdueCustomers : [];
   const recentPayments = Array.isArray(data.recentPayments) ? data.recentPayments : [];
   const recentCustomers = Array.isArray(data.recentCustomers) ? data.recentCustomers : [];
+
+  const displayCurrency = (val) => {
+    if (val === undefined || val === null) return '—';
+    return formatCurrency(val);
+  };
+
+  const displayCount = (val) => {
+    if (val === undefined || val === null) return '—';
+    return val;
+  };
 
   const pieData = [
     { name: 'Profit', value: profitLoss.totalProfit || 0, color: '#16a34a' },
@@ -149,26 +168,26 @@ export default function Dashboard() {
       <section>
         <h2 className="text-sm font-semibold text-gray-500 mb-3">BUSINESS OVERVIEW</h2>
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-          <StatCard label="Total Customers" value={business.totalCustomers} icon={Users} />
-          <StatCard label="Active Customers" value={business.activeCustomers} icon={UserCheck} tone="good" />
-          <StatCard label="Completed Customers" value={business.completedCustomers} icon={UserX} />
-          <StatCard label="Active Contracts" value={business.activeContracts} icon={Wallet} />
-          <StatCard label="Completed Contracts" value={business.completedContracts} icon={Wallet} tone="good" />
+          <StatCard label="Total Customers" value={displayCount(business.totalCustomers)} icon={Users} />
+          <StatCard label="Active Customers" value={displayCount(business.activeCustomers)} icon={UserCheck} tone="good" />
+          <StatCard label="Completed Customers" value={displayCount(business.completedCustomers)} icon={UserX} />
+          <StatCard label="Active Contracts" value={displayCount(business.activeContracts)} icon={Wallet} />
+          <StatCard label="Completed Contracts" value={displayCount(business.completedContracts)} icon={Wallet} tone="good" />
         </div>
       </section>
 
       <section>
         <h2 className="text-sm font-semibold text-gray-500 mb-3">BUSINESS FINANCIALS</h2>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <StatCard label="Total Sales" value={formatCurrency(financial.totalSales)} icon={DollarSign} />
-          <StatCard label="Total Product Cost" value={formatCurrency(financial.totalProductCost)} icon={DollarSign} />
-          <StatCard label="Total Collected" value={formatCurrency(financial.totalCollected)} icon={TrendingUp} tone="good" />
-          <StatCard label="Total Remaining" value={formatCurrency(financial.totalRemaining)} icon={Wallet} tone="warn" />
-          <StatCard label="Expected Profit" value={formatCurrency(financial.expectedProfit)} icon={TrendingUp} tone="good" />
-          <StatCard label="Expected Loss" value={formatCurrency(financial.expectedLoss)} icon={TrendingDown} tone="bad" />
+          <StatCard label="Total Sales" value={displayCurrency(financial.totalSales)} icon={DollarSign} />
+          <StatCard label="Total Product Cost" value={displayCurrency(financial.totalProductCost)} icon={DollarSign} />
+          <StatCard label="Total Collected" value={displayCurrency(financial.totalCollected)} icon={TrendingUp} tone="good" />
+          <StatCard label="Total Remaining" value={displayCurrency(financial.totalRemaining)} icon={Wallet} tone="warn" />
+          <StatCard label="Expected Profit" value={displayCurrency(financial.expectedProfit)} icon={TrendingUp} tone="good" />
+          <StatCard label="Expected Loss" value={displayCurrency(financial.expectedLoss)} icon={TrendingDown} tone="bad" />
           <StatCard
             label="Net Expected Profit"
-            value={formatCurrency(financial.netExpectedProfit)}
+            value={displayCurrency(financial.netExpectedProfit)}
             icon={TrendingUp}
             tone={financial.netExpectedProfit >= 0 ? 'good' : 'bad'}
           />
@@ -178,15 +197,15 @@ export default function Dashboard() {
       <section>
         <h2 className="text-sm font-semibold text-gray-500 mb-3">INSTALLMENT OVERVIEW</h2>
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-          <StatCard label="Paid" value={installments.paid} tone="good" />
-          <StatCard label="Partial" value={installments.partial} tone="warn" />
-          <StatCard label="Pending" value={installments.pending} />
-          <StatCard label="Missed" value={installments.missed} tone="bad" />
-          <StatCard label="Overdue" value={installments.overdue} tone="bad" />
+          <StatCard label="Paid" value={displayCount(installments.paid)} tone="good" />
+          <StatCard label="Partial" value={displayCount(installments.partial)} tone="warn" />
+          <StatCard label="Pending" value={displayCount(installments.pending)} />
+          <StatCard label="Missed" value={displayCount(installments.missed)} tone="bad" />
+          <StatCard label="Overdue" value={displayCount(installments.overdue)} tone="bad" />
         </div>
         <div className="grid grid-cols-2 gap-4 mt-4">
-          <StatCard label="Missed Amount" value={formatCurrency(installments.missedAmount)} tone="bad" />
-          <StatCard label="Overdue Amount" value={formatCurrency(installments.overdueAmount)} tone="bad" />
+          <StatCard label="Missed Amount" value={displayCurrency(installments.missedAmount)} tone="bad" />
+          <StatCard label="Overdue Amount" value={displayCurrency(installments.overdueAmount)} tone="bad" />
         </div>
       </section>
 
@@ -201,10 +220,10 @@ export default function Dashboard() {
             separate from investor capital and from overall business sales/profit above.
           </p>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <StatCard label="Total Owner Profit" value={formatCurrency(ownerProfit.totalOwnerProfit || 0)} tone="good" />
-            <StatCard label="Owner Profit Withdrawn" value={formatCurrency(ownerProfit.totalOwnerWithdrawn || 0)} tone="warn" />
-            <StatCard label="Owner Profit Remaining" value={formatCurrency(ownerProfit.totalOwnerRemaining || 0)} tone="good" />
-            <StatCard label="Investors Contributing" value={Array.isArray(ownerProfit.perInvestor) ? ownerProfit.perInvestor.length : (ownerProfit.investorsContributing || 0)} />
+            <StatCard label="Total Owner Profit" value={displayCurrency(ownerProfit.totalOwnerProfit)} tone="good" />
+            <StatCard label="Owner Profit Withdrawn" value={displayCurrency(ownerProfit.totalOwnerWithdrawn)} tone="warn" />
+            <StatCard label="Owner Profit Remaining" value={displayCurrency(ownerProfit.totalOwnerRemaining)} tone="good" />
+            <StatCard label="Investors Contributing" value={displayCount(Array.isArray(ownerProfit.perInvestor) ? ownerProfit.perInvestor.length : ownerProfit.investorsContributing)} />
           </div>
         </section>
       )}
@@ -219,16 +238,16 @@ export default function Dashboard() {
           accounting concepts and are never mixed.
         </p>
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
-          <StatCard label="Total Investors" value={investorOverview.totalInvestors} />
-          <StatCard label="Capital Received" value={formatCurrency(investorOverview.totalCapitalReceived)} />
-          <StatCard label="Capital Returned" value={formatCurrency(investorOverview.totalCapitalReturned)} />
-          <StatCard label="Capital Held" value={formatCurrency(investorOverview.totalCapitalHeld)} tone="good" />
-          <StatCard label="Capital Deployed" value={formatCurrency(investorOverview.totalCapitalDeployed)} tone="warn" />
-          <StatCard label="Recovered Capital" value={formatCurrency(investorOverview.totalRecoveredCapital || 0)} tone="good" />
-          <StatCard label="Capital Still Deployed" value={formatCurrency(investorOverview.totalCapitalStillDeployed != null ? investorOverview.totalCapitalStillDeployed : investorOverview.totalCapitalDeployed)} tone="warn" />
-          <StatCard label="Profit Reinvested" value={formatCurrency(investorOverview.totalProfitReinvested || 0)} tone="good" />
-          <StatCard label="Capital Available" value={formatCurrency(investorOverview.totalCapitalAvailable)} tone="good" />
-          <StatCard label="Investor-Funded Contracts" value={investorOverview.contractsFunded} />
+          <StatCard label="Total Investors" value={displayCount(investorOverview.totalInvestors)} />
+          <StatCard label="Capital Received" value={displayCurrency(investorOverview.totalCapitalReceived)} />
+          <StatCard label="Capital Returned" value={displayCurrency(investorOverview.totalCapitalReturned)} />
+          <StatCard label="Capital Held" value={displayCurrency(investorOverview.totalCapitalHeld)} tone="good" />
+          <StatCard label="Capital Deployed" value={displayCurrency(investorOverview.totalCapitalDeployed)} tone="warn" />
+          <StatCard label="Recovered Capital" value={displayCurrency(investorOverview.totalRecoveredCapital)} tone="good" />
+          <StatCard label="Capital Still Deployed" value={displayCurrency(investorOverview.totalCapitalStillDeployed != null ? investorOverview.totalCapitalStillDeployed : investorOverview.totalCapitalDeployed)} tone="warn" />
+          <StatCard label="Profit Reinvested" value={displayCurrency(investorOverview.totalProfitReinvested)} tone="good" />
+          <StatCard label="Capital Available" value={displayCurrency(investorOverview.totalCapitalAvailable)} tone="good" />
+          <StatCard label="Investor-Funded Contracts" value={displayCount(investorOverview.contractsFunded)} />
         </div>
 
         {topInvestors.length > 0 && (

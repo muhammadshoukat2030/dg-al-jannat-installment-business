@@ -21,6 +21,7 @@ import {
   getBootstrapManifest,
   setBootstrapManifest,
   getStorageDiagnostics,
+  getDashboardOffline,
 } from './db';
 
 // Listeners for sync state changes
@@ -199,29 +200,11 @@ async function deriveAndStoreOfflineReports() {
 
     // Derive cached dashboard summary if absent
     const existingDash = await getMetadata('cachedDashboardSummary');
-    if (!existingDash || !existingDash.totalCustomers) {
-      const totalSales = activePlans.reduce((sum, p) => sum + (p.sellingPrice || p.totalAmount || 0), 0);
-      const totalReceived = payments.reduce((sum, p) => sum + (p.amount || 0), 0);
-      const totalRemaining = Math.max(0, totalSales - totalReceived);
-      const totalOutstanding = outstandingPlans.reduce((sum, p) => sum + p.remainingBalance, 0);
-
-      const derivedDashboard = {
-        totalCustomers: activeCustomers.length,
-        totalSales,
-        totalReceived,
-        totalRemaining,
-        todayCollection: todayTotal,
-        monthlyCollection: monthTotal,
-        totalOutstanding,
-        overdueCount: overdueInstallments.length,
-        recentPayments: payments.slice(0, 10),
-        recentCustomers: activeCustomers.slice(0, 10),
-        investorOverview: {
-          totalInvestors: investors.filter((i) => !i.isDeleted).length,
-          totalCapital: 0,
-        },
-      };
-      await setMetadata('cachedDashboardSummary', derivedDashboard);
+    if (!existingDash || !existingDash.business) {
+      const derivedDashboard = await getDashboardOffline();
+      if (derivedDashboard) {
+        await setMetadata('cachedDashboardSummary', derivedDashboard);
+      }
     }
   } catch (err) {
     console.warn('Non-fatal: could not derive offline reports during sync:', err.message);
