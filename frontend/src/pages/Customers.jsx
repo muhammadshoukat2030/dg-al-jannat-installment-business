@@ -6,7 +6,20 @@ import { customerApi, exportApi } from '../api/services';
 import { formatDate } from '../utils/format';
 import DeleteCustomerModal from '../components/customers/DeleteCustomerModal';
 import { useSmartScroll } from '../hooks/useSmartScroll';
-import { queryCustomersOffline } from '../offline/db';
+import { queryCustomersOffline, putMany } from '../offline/db';
+
+function getCustomerProducts(customer) {
+  if (Array.isArray(customer?.productNames) && customer.productNames.length > 0) {
+    return customer.productNames;
+  }
+  if (customer?.productName && customer.productName !== 'No Product') {
+    return customer.productName
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+  return [];
+}
 
 export default function Customers() {
   const [search, setSearch] = useState('');
@@ -14,7 +27,13 @@ export default function Customers() {
   const [deleteTarget, setDeleteTarget] = useState(null);
 
   const fetchOnline = useCallback(
-    (params) => customerApi.list(params).then((res) => res.data),
+    (params) =>
+      customerApi.list(params).then((res) => {
+        if (res.data?.data && Array.isArray(res.data.data)) {
+          putMany('customers', res.data.data).catch(() => {});
+        }
+        return res.data;
+      }),
     []
   );
 
@@ -99,6 +118,7 @@ export default function Customers() {
             <tr>
               <th className="px-4 py-2 font-medium">Customer ID</th>
               <th className="px-4 py-2 font-medium">Name</th>
+              <th className="px-4 py-2 font-medium">Product Name</th>
               <th className="px-4 py-2 font-medium">Phone</th>
               <th className="px-4 py-2 font-medium hidden lg:table-cell">CNIC</th>
               <th className="px-4 py-2 font-medium">City</th>
@@ -109,49 +129,71 @@ export default function Customers() {
           <tbody>
             {loading && (
               <tr>
-                <td colSpan={7} className="px-4 py-6 text-center text-gray-400">
+                <td colSpan={8} className="px-4 py-6 text-center text-gray-400">
                   Loading customers...
                 </td>
               </tr>
             )}
             {!loading && customers.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-4 py-6 text-center text-gray-400">
+                <td colSpan={8} className="px-4 py-6 text-center text-gray-400">
                   No customers found.
                 </td>
               </tr>
             )}
             {!loading &&
-              customers.map((c) => (
-                <tr key={c._id || c.operationId} className="border-t border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/50">
-                  <td className="px-4 py-2 font-mono text-xs text-gray-500">
-                    {c.customerId}
-                    {c.isPendingSync && (
-                      <span className="ml-1.5 badge bg-amber-500/10 text-amber-600 dark:text-amber-400 text-[10px]">
-                        Sync Pending
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-4 py-2 font-medium">
-                    <Link to={`/customers/${c._id}`} className="text-primary-600 hover:underline">
-                      {c.name}
-                    </Link>
-                  </td>
-                  <td className="px-4 py-2">{c.contactNumber}</td>
-                  <td className="px-4 py-2 hidden lg:table-cell">{c.cnic || '—'}</td>
-                  <td className="px-4 py-2">{c.city || '—'}</td>
-                  <td className="px-4 py-2 text-xs text-gray-500">{formatDate(c.createdAt)}</td>
-                  <td className="px-4 py-2 no-print">
-                    <button
-                      className="text-red-600 hover:text-red-700 p-1"
-                      onClick={() => setDeleteTarget(c)}
-                      aria-label={`Delete ${c.name}`}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              customers.map((c) => {
+                const productList = getCustomerProducts(c);
+
+                return (
+                  <tr key={c._id || c.operationId} className="border-t border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                    <td className="px-4 py-2 font-mono text-xs text-gray-500">
+                      {c.customerId}
+                      {c.isPendingSync && (
+                        <span className="ml-1.5 badge bg-amber-500/10 text-amber-600 dark:text-amber-400 text-[10px]">
+                          Sync Pending
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-2 font-medium">
+                      <Link to={`/customers/${c._id}`} className="text-primary-600 hover:underline">
+                        {c.name}
+                      </Link>
+                    </td>
+                    <td className="px-4 py-2">
+                      {productList.length === 0 ? (
+                        <span className="text-gray-400 italic text-xs">No Product</span>
+                      ) : productList.length === 1 ? (
+                        <span className="font-medium text-gray-800 dark:text-gray-200">{productList[0]}</span>
+                      ) : (
+                        <div className="flex flex-wrap gap-1 max-w-xs">
+                          {productList.map((p, idx) => (
+                            <span
+                              key={idx}
+                              className="inline-block px-1.5 py-0.5 rounded text-xs font-medium bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700"
+                            >
+                              {p}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-4 py-2">{c.contactNumber}</td>
+                    <td className="px-4 py-2 hidden lg:table-cell">{c.cnic || '—'}</td>
+                    <td className="px-4 py-2">{c.city || '—'}</td>
+                    <td className="px-4 py-2 text-xs text-gray-500">{formatDate(c.createdAt)}</td>
+                    <td className="px-4 py-2 no-print">
+                      <button
+                        className="text-red-600 hover:text-red-700 p-1"
+                        onClick={() => setDeleteTarget(c)}
+                        aria-label={`Delete ${c.name}`}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
           </tbody>
         </table>
       </div>
@@ -161,26 +203,38 @@ export default function Customers() {
         {loading && <p className="text-center text-gray-400 py-6">Loading customers...</p>}
         {!loading && customers.length === 0 && <p className="text-center text-gray-400 py-6">No customers found.</p>}
         {!loading &&
-          customers.map((c) => (
-            <div key={c._id || c.operationId} className="card flex items-center justify-between gap-3">
-              <Link to={`/customers/${c._id}`} className="min-w-0">
-                <p className="font-medium text-primary-600 truncate flex items-center gap-1.5">
-                  {c.name}
-                  {c.isPendingSync && (
-                    <span className="badge bg-amber-500/10 text-amber-600 text-[10px]">
-                      Pending
-                    </span>
-                  )}
-                </p>
-                <p className="text-xs text-gray-500">{c.customerId} · {c.contactNumber}</p>
-                {c.cnic && <p className="text-xs text-gray-400">CNIC: {c.cnic}</p>}
-                {c.city && <p className="text-xs text-gray-400">{c.city}</p>}
-              </Link>
-              <button className="text-red-600 shrink-0 p-2" onClick={() => setDeleteTarget(c)} aria-label={`Delete ${c.name}`}>
-                <Trash2 className="w-4 h-4" />
-              </button>
-            </div>
-          ))}
+          customers.map((c) => {
+            const productList = getCustomerProducts(c);
+
+            return (
+              <div key={c._id || c.operationId} className="card flex items-center justify-between gap-3">
+                <Link to={`/customers/${c._id}`} className="min-w-0">
+                  <p className="font-medium text-primary-600 truncate flex items-center gap-1.5">
+                    {c.name}
+                    {c.isPendingSync && (
+                      <span className="badge bg-amber-500/10 text-amber-600 text-[10px]">
+                        Pending
+                      </span>
+                    )}
+                  </p>
+                  <p className="text-xs text-gray-500">{c.customerId} · {c.contactNumber}</p>
+                  <p className="text-xs text-gray-600 dark:text-gray-300 mt-0.5">
+                    <span className="text-gray-400 font-normal">Product: </span>
+                    {productList.length > 0 ? (
+                      <span className="font-medium text-gray-800 dark:text-gray-200">{productList.join(', ')}</span>
+                    ) : (
+                      <span className="text-gray-400 italic">No Product</span>
+                    )}
+                  </p>
+                  {c.cnic && <p className="text-xs text-gray-400">CNIC: {c.cnic}</p>}
+                  {c.city && <p className="text-xs text-gray-400">{c.city}</p>}
+                </Link>
+                <button className="text-red-600 shrink-0 p-2" onClick={() => setDeleteTarget(c)} aria-label={`Delete ${c.name}`}>
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            );
+          })}
       </div>
 
       {/* Infinite Scroll Sentinel / Loading More Indicator */}

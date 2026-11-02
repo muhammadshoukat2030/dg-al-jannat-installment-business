@@ -15,19 +15,52 @@ const listCustomers = asyncHandler(async (req, res) => {
   else if (status === 'active') query.isArchived = false;
 
   if (search) {
+    // Also match customers whose non-deleted contracts/plans match the search term
+    const matchingPlans = await InstallmentPlan.find(
+      { productName: { $regex: search, $options: 'i' }, isDeleted: { $ne: true } },
+      'customerId'
+    ).lean();
+    const matchingCustomerIds = matchingPlans.map((p) => p.customerId).filter(Boolean);
+
     query.$or = [
       { name: { $regex: search, $options: 'i' } },
       { contactNumber: { $regex: search, $options: 'i' } },
       { cnic: { $regex: search, $options: 'i' } },
       { customerId: { $regex: search, $options: 'i' } },
+      { _id: { $in: matchingCustomerIds } },
     ];
   }
 
   const skip = (Number(page) - 1) * Number(limit);
-  const [customers, total] = await Promise.all([
-    Customer.find(query).sort({ createdAt: -1 }).skip(skip).limit(Number(limit)),
+  const [rawCustomers, total] = await Promise.all([
+    Customer.find(query).sort({ createdAt: -1 }).skip(skip).limit(Number(limit)).lean(),
     Customer.countDocuments(query),
   ]);
+
+  // Fetch all non-deleted plans for these customers to include purchased product names
+  const customerIds = rawCustomers.map((c) => c._id);
+  const plans = await InstallmentPlan.find(
+    { customerId: { $in: customerIds }, isDeleted: { $ne: true } },
+    'customerId productName'
+  ).lean();
+
+  const planMap = new Map();
+  for (const p of plans) {
+    const cid = String(p.customerId);
+    if (!planMap.has(cid)) planMap.set(cid, []);
+    if (p.productName && p.productName.trim()) {
+      planMap.get(cid).push(p.productName.trim());
+    }
+  }
+
+  const customers = rawCustomers.map((c) => {
+    const pList = [...new Set(planMap.get(String(c._id)) || [])];
+    return {
+      ...c,
+      productNames: pList,
+      productName: pList.length > 0 ? pList.join(', ') : 'No Product',
+    };
+  });
 
   res.json({ success: true, data: customers, total, page: Number(page), pages: Math.ceil(total / limit) });
 });

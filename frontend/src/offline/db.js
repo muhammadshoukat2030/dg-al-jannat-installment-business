@@ -316,8 +316,61 @@ export async function getStorageQuotaEstimate() {
 // ---------------- Offline Local Query Helpers ----------------
 
 export async function queryCustomersOffline({ search, status = 'active', page = 1, limit = 20 } = {}) {
-  const all = await getAll('customers');
-  let filtered = all.filter((c) => !c.isDeleted);
+  const [all, plans] = await Promise.all([
+    getAll('customers'),
+    getAll('installmentPlans'),
+  ]);
+
+  // Build mapping from customer identifiers to non-deleted plan product names
+  const plansByCustomer = new Map();
+  for (const p of plans || []) {
+    if (p.isDeleted) continue;
+    const cids = [
+      p.customerId?._id,
+      p.customerId?.id,
+      p.customerId,
+      p.customer?._id,
+      p.customer,
+    ].filter(Boolean).map(String);
+    for (const cid of cids) {
+      if (!plansByCustomer.has(cid)) plansByCustomer.set(cid, []);
+      if (p.productName && p.productName.trim()) {
+        plansByCustomer.get(cid).push(p.productName.trim());
+      }
+    }
+  }
+
+  let filtered = (all || []).filter((c) => !c.isDeleted).map((c) => {
+    const keys = [
+      c._id,
+      c.id,
+      c.customerId,
+      c.operationId,
+      c.localId,
+    ].filter(Boolean).map(String);
+
+    let pList = [];
+    for (const k of keys) {
+      const found = plansByCustomer.get(k);
+      if (found && found.length > 0) {
+        pList.push(...found);
+      }
+    }
+
+    if (pList.length === 0 && Array.isArray(c.productNames) && c.productNames.length > 0) {
+      pList = c.productNames;
+    }
+    if (pList.length === 0 && c.productName && c.productName !== 'No Product') {
+      pList = c.productName.split(',').map((s) => s.trim()).filter(Boolean);
+    }
+
+    const uniqueProducts = [...new Set(pList)];
+    return {
+      ...c,
+      productNames: uniqueProducts,
+      productName: uniqueProducts.length > 0 ? uniqueProducts.join(', ') : 'No Product',
+    };
+  });
 
   if (status === 'archived') {
     filtered = filtered.filter((c) => c.isArchived);
@@ -332,7 +385,8 @@ export async function queryCustomersOffline({ search, status = 'active', page = 
         (c.name && c.name.toLowerCase().includes(s)) ||
         (c.contactNumber && c.contactNumber.includes(s)) ||
         (c.cnic && c.cnic.includes(s)) ||
-        (c.customerId && c.customerId.toLowerCase().includes(s))
+        (c.customerId && c.customerId.toLowerCase().includes(s)) ||
+        (c.productName && c.productName.toLowerCase().includes(s))
     );
   }
 

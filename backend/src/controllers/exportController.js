@@ -238,13 +238,33 @@ const missedPdf = asyncHandler(async (req, res) => {
 // ---------- EXCEL EXPORTS ----------
 
 const customersExcel = asyncHandler(async (req, res) => {
-  const customers = await Customer.find({ isDeleted: { $ne: true } }).sort({ createdAt: -1 });
+  const customers = await Customer.find({ isDeleted: { $ne: true } }).sort({ createdAt: -1 }).lean();
+  const plans = await InstallmentPlan.find({ isDeleted: { $ne: true } }, 'customerId productName').lean();
+
+  const planMap = new Map();
+  for (const p of plans) {
+    const cid = String(p.customerId);
+    if (!planMap.has(cid)) planMap.set(cid, []);
+    if (p.productName && p.productName.trim()) {
+      planMap.get(cid).push(p.productName.trim());
+    }
+  }
+
+  const rows = customers.map((c) => {
+    const pList = [...new Set(planMap.get(String(c._id)) || [])];
+    return {
+      ...c,
+      productName: pList.length > 0 ? pList.join(', ') : 'No Product',
+    };
+  });
+
   await generateExcel(res, {
     filename: 'customers.xlsx',
     sheetName: 'Customers',
     columns: [
       { header: 'Customer ID', key: 'customerId', width: 15 },
       { header: 'Name', key: 'name', width: 25 },
+      { header: 'Product Name', key: 'productName', width: 25 },
       { header: 'Father Name', key: 'fatherName', width: 20 },
       { header: 'CNIC', key: 'cnic', width: 20 },
       { header: 'Contact', key: 'contactNumber', width: 18 },
@@ -252,7 +272,7 @@ const customersExcel = asyncHandler(async (req, res) => {
       { header: 'Archived', key: 'isArchived', width: 12 },
       { header: 'Added On', key: 'createdAt', width: 15, format: (v) => formatDate(v) },
     ],
-    rows: customers,
+    rows,
   });
 });
 
