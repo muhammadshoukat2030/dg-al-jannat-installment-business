@@ -19,6 +19,9 @@ const OwnerTransaction = require('./OwnerTransaction');
 const Payment = require('./Payment');
 const ProfitDistribution = require('./ProfitDistribution');
 const Withdrawal = require('./Withdrawal');
+const BackupConfig = require('./BackupConfig');
+const BackupRecord = require('./BackupRecord');
+const BackupAuditLog = require('./BackupAuditLog');
 
 module.exports = {
   Admin,
@@ -35,4 +38,7 @@ module.exports = {
   Payment,
   ProfitDistribution,
   Withdrawal,
+  BackupConfig,
+  BackupRecord,
+  BackupAuditLog,
 };

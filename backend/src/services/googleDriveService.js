@@ -1,0 +1,509 @@
+/**
+ * Google Drive API v3 Service for Installment Management System 6
+ * Implements 100% free personal Google Drive integration via OAuth 2.0.
+ *
+ * Scope: https://www.googleapis.com/auth/drive.file (Strict minimum permission)
+ * Private Folder: 'Installment-System-Backups'
+ * No external paid libraries; uses Node.js standard HTTPS / global fetch.
+ */
+
+const BackupConfig = require('../models/BackupConfig');
+const mongoose = require('mongoose');
+const fs = require('fs');
+const path = require('path');
+
+const DISK_TOKEN_PATH = path.resolve(__dirname, '../../.google_drive_tokens.json');
+
+const GOOGLE_AUTH_ENDPOINT = 'https://accounts.google.com/o/oauth2/v2/auth';
+const GOOGLE_TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token';
+const GOOGLE_REVOKE_ENDPOINT = 'https://oauth2.googleapis.com/revoke';
+const GOOGLE_USERINFO_ENDPOINT = 'https://www.googleapis.com/oauth2/v2/userinfo';
+const DRIVE_API_ENDPOINT = 'https://www.googleapis.com/drive/v3';
+const DRIVE_UPLOAD_ENDPOINT = 'https://www.googleapis.com/upload/drive/v3/files';
+
+const FOLDER_NAME = 'Installment-System-Backups';
+const DRIVE_FILE_SCOPE = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email';
+
+/**
+ * Persists Google Drive tokens to a secure local file outside MongoDB.
+ * Ensures recovery is possible even if all MongoDB collections or databases are deleted.
+ */
+function saveTokensToDisk(data) {
+  try {
+    fs.writeFileSync(DISK_TOKEN_PATH, JSON.stringify(data, null, 2), { encoding: 'utf-8', mode: 0o600 });
+  } catch (err) {
+    console.warn('[GoogleDrive] Could not save tokens to disk:', err.message);
+  }
+}
+
+/**
+ * Loads cached Google Drive tokens from local disk if database is wiped or offline.
+ */
+function loadTokensFromDisk() {
+  try {
+    if (fs.existsSync(DISK_TOKEN_PATH)) {
+      const content = fs.readFileSync(DISK_TOKEN_PATH, 'utf-8');
+      return JSON.parse(content);
+    }
+  } catch (err) {
+    console.warn('[GoogleDrive] Could not load tokens from disk:', err.message);
+  }
+  return null;
+}
+
+/**
+ * Returns OAuth Client Credentials from environment.
+ */
+function getOAuthCredentials() {
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  const redirectUri = process.env.GOOGLE_REDIRECT_URI || 'http://localhost:5000/api/backup/oauth/callback';
+
+  return {
+    clientId,
+    clientSecret,
+    redirectUri,
+    isConfigured: !!(clientId && clientSecret),
+  };
+}
+
+/**
+ * Generates the Google OAuth 2.0 consent authorization URL.
+ */
+function getAuthorizationUrl() {
+  const { clientId, redirectUri, isConfigured } = getOAuthCredentials();
+  if (!isConfigured) {
+    throw new Error('Google OAuth credentials (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET) are not configured in backend environment variables.');
+  }
+
+  const params = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    response_type: 'code',
+    scope: DRIVE_FILE_SCOPE,
+    access_type: 'offline',
+    prompt: 'consent', // guarantees a refresh_token is returned
+    include_granted_scopes: 'true',
+  });
+
+  return `${GOOGLE_AUTH_ENDPOINT}?${params.toString()}`;
+}
+
+/**
+ * Exchanges authorization code for access and refresh tokens.
+ */
+async function exchangeCodeForTokens(code) {
+  const { clientId, clientSecret, redirectUri } = getOAuthCredentials();
+
+  const response = await fetch(GOOGLE_TOKEN_ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      code,
+      client_id: clientId,
+      client_secret: clientSecret,
+      redirect_uri: redirectUri,
+      grant_type: 'authorization_code',
+    }),
+  });
+
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(`Google token exchange failed: ${data.error_description || data.error || response.statusText}`);
+  }
+
+  return {
+    access_token: data.access_token,
+    refresh_token: data.refresh_token,
+    expiry_date: Date.now() + (data.expires_in || 3600) * 1000,
+    scope: data.scope,
+    token_type: data.token_type || 'Bearer',
+  };
+}
+
+/**
+ * Refreshes an expired access token using the stored refresh_token.
+ */
+async function refreshAccessToken(refreshToken) {
+  const { clientId, clientSecret } = getOAuthCredentials();
+  if (!refreshToken) throw new Error('No refresh token available to renew Google access.');
+
+  const response = await fetch(GOOGLE_TOKEN_ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      refresh_token: refreshToken,
+      grant_type: 'refresh_token',
+    }),
+  });
+
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(`Failed to refresh Google access token: ${data.error_description || data.error}`);
+  }
+
+  return {
+    access_token: data.access_token,
+    expiry_date: Date.now() + (data.expires_in || 3600) * 1000,
+  };
+}
+
+/**
+ * Returns a valid access token for API operations, auto-refreshing if within 5 mins of expiry.
+ * Works even if MongoDB is empty or uninitialized by reading from disk cache.
+ */
+async function getValidAccessToken() {
+  let config = null;
+  if (mongoose.connection && mongoose.connection.readyState === 1) {
+    try {
+      config = await BackupConfig.findOne({ key: 'global_backup_config' });
+    } catch (err) {
+      // Database may be offline or empty
+    }
+  }
+
+  const diskData = loadTokensFromDisk();
+
+  // If MongoDB config has tokens, sync to disk if disk is missing or has older tokens
+  if (config?.googleDrive?.isConnected && config.googleDrive?.tokens?.refresh_token) {
+    if (!diskData || diskData.tokens?.refresh_token !== config.googleDrive.tokens.refresh_token) {
+      saveTokensToDisk({
+        isConnected: true,
+        email: config.googleDrive.email || '',
+        folderId: config.googleDrive.folderId || '',
+        folderName: config.googleDrive.folderName || FOLDER_NAME,
+        tokens: config.googleDrive.tokens,
+        lastCheckedAt: config.googleDrive.lastCheckedAt || new Date(),
+      });
+    }
+  }
+
+  // Resolve tokens from config first, otherwise from disk cache
+  const tokens = config?.googleDrive?.tokens?.refresh_token
+    ? config.googleDrive.tokens
+    : diskData?.tokens;
+
+  if (!tokens || !tokens.refresh_token) {
+    return null;
+  }
+
+  const now = Date.now();
+  // If token has at least 5 minutes remaining, reuse it
+  if (tokens.access_token && tokens.expiry_date && tokens.expiry_date - now > 300000) {
+    return tokens.access_token;
+  }
+
+  let refreshed = null;
+  try {
+    // Refresh token
+    refreshed = await refreshAccessToken(tokens.refresh_token);
+    tokens.access_token = refreshed.access_token;
+    tokens.expiry_date = refreshed.expiry_date;
+
+    // Persist refreshed token to disk
+    if (diskData) {
+      diskData.tokens = diskData.tokens || {};
+      diskData.tokens.access_token = refreshed.access_token;
+      diskData.tokens.expiry_date = refreshed.expiry_date;
+      saveTokensToDisk(diskData);
+    }
+  } catch (err) {
+    // Gracefully handle revoked or expired refresh token
+    return null;
+  }
+
+  // Persist to MongoDB if available
+  if (config) {
+    try {
+      config.googleDrive.tokens.access_token = refreshed.access_token;
+      config.googleDrive.tokens.expiry_date = refreshed.expiry_date;
+      await config.save();
+    } catch {}
+  }
+
+  return refreshed.access_token;
+}
+
+/**
+ * Fetches user profile information (email) using access token.
+ */
+async function getUserProfile(accessToken) {
+  const response = await fetch(GOOGLE_USERINFO_ENDPOINT, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!response.ok) return null;
+  return response.json();
+}
+
+/**
+ * Locates or creates the private backup folder 'Installment-System-Backups' in Google Drive.
+ */
+async function getOrCreateBackupFolder(accessToken) {
+  // 1. Search for existing folder
+  const query = encodeURIComponent(
+    `name = '${FOLDER_NAME}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`
+  );
+  const searchRes = await fetch(`${DRIVE_API_ENDPOINT}/files?q=${query}&fields=files(id,name)&spaces=drive`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+
+  if (searchRes.ok) {
+    const data = await searchRes.json();
+    if (data.files && data.files.length > 0) {
+      return data.files[0].id;
+    }
+  }
+
+  // 2. Create folder if not found
+  const createRes = await fetch(`${DRIVE_API_ENDPOINT}/files`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      name: FOLDER_NAME,
+      mimeType: 'application/vnd.google-apps.folder',
+      description: 'Private backup vault for Installment Management System database archives.',
+    }),
+  });
+
+  const createdData = await createRes.json();
+  if (!createRes.ok) {
+    throw new Error(`Failed to create Google Drive backup folder: ${createdData.error?.message || createRes.statusText}`);
+  }
+
+  return createdData.id;
+}
+
+/**
+ * Uploads an encrypted backup file to the private Google Drive folder using multipart upload.
+ */
+async function uploadBackupFile({
+  fileName,
+  fileBuffer,
+  folderId = null,
+  properties = {},
+}) {
+  const accessToken = await getValidAccessToken();
+  if (!accessToken) {
+    throw new Error('Google Drive is not connected or authorization has expired.');
+  }
+
+  const targetFolderId = folderId || (await getOrCreateBackupFolder(accessToken));
+
+  const metadata = {
+    name: fileName,
+    parents: [targetFolderId],
+    description: `Encrypted database backup archive created on ${new Date().toISOString()}`,
+    properties: {
+      system: 'installment-system-6',
+      backupId: properties.backupId || '',
+      sha256: properties.sha256 || '',
+      createdAt: properties.createdAt || new Date().toISOString(),
+    },
+  };
+
+  const boundary = '-------314159265358979323846';
+  const delimiter = `\r\n--${boundary}\r\n`;
+  const closeDelimiter = `\r\n--${boundary}--`;
+
+  const metaPart = `${delimiter}Content-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}`;
+  const mediaHeader = `${delimiter}Content-Type: application/octet-stream\r\n\r\n`;
+
+  const payload = Buffer.concat([
+    Buffer.from(metaPart, 'utf-8'),
+    Buffer.from(mediaHeader, 'utf-8'),
+    fileBuffer,
+    Buffer.from(closeDelimiter, 'utf-8'),
+  ]);
+
+  const uploadRes = await fetch(`${DRIVE_UPLOAD_ENDPOINT}?uploadType=multipart&fields=id,name,size,webContentLink`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': `multipart/related; boundary=${boundary}`,
+      'Content-Length': payload.length.toString(),
+    },
+    body: payload,
+  });
+
+  const data = await uploadRes.json();
+  if (!uploadRes.ok) {
+    throw new Error(`Google Drive upload failed: ${data.error?.message || uploadRes.statusText}`);
+  }
+
+  return {
+    fileId: data.id,
+    fileName: data.name,
+    sizeBytes: parseInt(data.size || fileBuffer.length, 10),
+    webContentLink: data.webContentLink || '',
+    folderId: targetFolderId,
+  };
+}
+
+/**
+ * Downloads a backup file buffer directly from Google Drive.
+ */
+async function downloadBackupFile(fileId) {
+  const accessToken = await getValidAccessToken();
+  if (!accessToken) {
+    throw new Error('Google Drive is not connected.');
+  }
+
+  const res = await fetch(`${DRIVE_API_ENDPOINT}/files/${fileId}?alt=media`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+
+  if (!res.ok) {
+    const errorText = await res.text().catch(() => '');
+    throw new Error(`Google Drive download failed (${res.status}): ${errorText || res.statusText}`);
+  }
+
+  const arrayBuffer = await res.arrayBuffer();
+  return Buffer.from(arrayBuffer);
+}
+
+/**
+ * Deletes a backup file from Google Drive.
+ */
+async function deleteBackupFile(fileId) {
+  const accessToken = await getValidAccessToken();
+  if (!accessToken) return;
+
+  await fetch(`${DRIVE_API_ENDPOINT}/files/${fileId}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+}
+
+/**
+ * Retrieves storage quota and usage information from Google Drive.
+ */
+async function getStorageQuota() {
+  const accessToken = await getValidAccessToken();
+  if (!accessToken) return null;
+
+  try {
+    const res = await fetch(`${DRIVE_API_ENDPOINT}/about?fields=storageQuota,user`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return {
+      usageBytes: parseInt(data.storageQuota?.usage || 0, 10),
+      limitBytes: parseInt(data.storageQuota?.limit || 0, 10),
+      userEmail: data.user?.emailAddress || '',
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Revokes Google OAuth token on disconnect.
+ */
+async function revokeTokens(token) {
+  if (!token) return;
+  try {
+    await fetch(`${GOOGLE_REVOKE_ENDPOINT}?token=${token}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    });
+  } catch {}
+}
+
+/**
+ * Lists all .imsbak backup files directly from Google Drive folder.
+ * Works even if MongoDB database is completely empty or deleted.
+ */
+async function listGoogleDriveBackups() {
+  const accessToken = await getValidAccessToken();
+  if (!accessToken) {
+    return {
+      connected: false,
+      message: 'Google Drive is not connected or authorization expired.',
+      backups: [],
+    };
+  }
+
+  let folderId;
+  let files = [];
+  try {
+    folderId = await getOrCreateBackupFolder(accessToken);
+    const query = encodeURIComponent(`'${folderId}' in parents and trashed = false and name contains '.imsbak'`);
+
+    const res = await fetch(
+      `${DRIVE_API_ENDPOINT}/files?q=${query}&fields=files(id,name,size,createdTime,modifiedTime,properties,webContentLink)&orderBy=createdTime desc&pageSize=100`,
+      {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      }
+    );
+
+    if (!res.ok) {
+      const errorText = await res.text().catch(() => '');
+      return {
+        connected: false,
+        message: `Google Drive API error (${res.status}): ${errorText || res.statusText}`,
+        backups: [],
+      };
+    }
+
+    const data = await res.json();
+    files = data.files || [];
+  } catch (err) {
+    return {
+      connected: false,
+      message: err.message || 'Failed to communicate with Google Drive API.',
+      backups: [],
+    };
+  }
+
+  // Inspect local backups directory to mark local availability
+  const BACKUPS_DIR = path.resolve(__dirname, '../../backups');
+
+  const backups = files.map((f) => {
+    const localFile = path.join(BACKUPS_DIR, f.name);
+    const isLocal = fs.existsSync(localFile);
+    return {
+      fileId: f.id,
+      fileName: f.name,
+      sizeBytes: parseInt(f.size || 0, 10),
+      createdAt: f.createdTime,
+      modifiedAt: f.modifiedTime,
+      backupId: f.properties?.backupId || f.name.replace('.imsbak', ''),
+      sha256: f.properties?.sha256 || '',
+      isCloud: true,
+      isLocal,
+      webContentLink: f.webContentLink || '',
+    };
+  });
+
+  return {
+    connected: true,
+    folderId,
+    totalFiles: backups.length,
+    backups,
+  };
+}
+
+module.exports = {
+  FOLDER_NAME,
+  getOAuthCredentials,
+  getAuthorizationUrl,
+  exchangeCodeForTokens,
+  refreshAccessToken,
+  getValidAccessToken,
+  saveTokensToDisk,
+  loadTokensFromDisk,
+  getUserProfile,
+  getOrCreateBackupFolder,
+  uploadBackupFile,
+  downloadBackupFile,
+  deleteBackupFile,
+  getStorageQuota,
+  revokeTokens,
+  listGoogleDriveBackups,
+};

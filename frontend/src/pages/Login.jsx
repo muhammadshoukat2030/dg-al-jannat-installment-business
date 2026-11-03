@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { Sun, Moon } from 'lucide-react';
+import DeveloperFooter from '../components/common/DeveloperFooter';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -71,9 +72,7 @@ export default function Login() {
           </button>
         </form>
 
-        <p className="text-center text-[11px] text-theme-muted mt-6 pt-4 border-t border-theme-border">
-          Software Development by SHOUKAT | 03348004300
-        </p>
+        <DeveloperFooter className="!mt-6 !pt-4 !border-t !border-theme-border" />
       </div>
     </div>
   );

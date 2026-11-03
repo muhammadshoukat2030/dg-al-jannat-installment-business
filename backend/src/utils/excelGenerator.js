@@ -1,6 +1,7 @@
 const ExcelJS = require('exceljs');
 
-const DEVELOPER_FOOTER_TEXT = 'Software Development by SHOUKAT | 03348004300';
+const DEVELOPER_FOOTER_TEXT = 'Developed by SHOUKAT | 03348004300 | devzore.com';
+const DEVELOPER_WEBSITE_URL = 'https://devzore.com';
 
 /**
  * Stream a generic worksheet of rows to the response as .xlsx.
@@ -32,9 +33,15 @@ async function generateExcel(res, { filename, sheetName, columns, rows }) {
   // separate from the data block so it doesn't corrupt the actual report data.
   sheet.addRow([]);
   const brandRow = sheet.addRow([DEVELOPER_FOOTER_TEXT]);
-  brandRow.font = { italic: true, size: 9, color: { argb: 'FF888888' } };
+  const brandCell = brandRow.getCell(1);
+  brandCell.value = {
+    text: DEVELOPER_FOOTER_TEXT,
+    hyperlink: DEVELOPER_WEBSITE_URL,
+    tooltip: DEVELOPER_WEBSITE_URL,
+  };
+  brandCell.font = { italic: true, size: 9, color: { argb: 'FF4F46E5' }, underline: false };
   sheet.mergeCells(brandRow.number, 1, brandRow.number, Math.max(columns.length, 1));
-  brandRow.getCell(1).alignment = { horizontal: 'center' };
+  brandCell.alignment = { horizontal: 'center' };
 
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
@@ -43,4 +50,4 @@ async function generateExcel(res, { filename, sheetName, columns, rows }) {
   res.end();
 }
 
-module.exports = { generateExcel };
+module.exports = { generateExcel, DEVELOPER_FOOTER_TEXT };

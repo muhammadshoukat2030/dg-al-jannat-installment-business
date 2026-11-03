@@ -349,8 +349,8 @@ export default function MultiFundingSelector({ purchaseCost, onChange }) {
         </p>
       )}
 
-      <p className="text-xs text-theme-muted text-right">
-        Software Development by SHOUKAT | 03348004300
+      <p className="text-xs text-right text-indigo-600/80 dark:text-indigo-400/80 print:text-indigo-700">
+        Developed by SHOUKAT | <a href="tel:03348004300" className="hover:underline">03348004300</a> | <a href="https://devzore.com" target="_blank" rel="noopener noreferrer" className="hover:underline">devzore.com</a>
       </p>
     </div>
   );

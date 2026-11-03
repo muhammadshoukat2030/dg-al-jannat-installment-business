@@ -236,3 +236,20 @@ export const fundingApi = {
   get: (planId) => client.get(`/funding/${planId}`),
   allocate: (planId, allocations) => client.post(`/funding/${planId}/allocate`, { allocations }),
 };
+
+export const backupApi = {
+  getStatus: () => client.get('/backup/status'),
+  getHistory: (params) => client.get('/backup/history', { params }),
+  create: () => client.post('/backup/create'),
+  verify: (id) => client.post(`/backup/verify/${id}`),
+  download: (id, filename) => downloadFile(`/backup/download/${id}`, filename || `backup_${id}.imsbak`),
+  testRestore: (id) => client.post(`/backup/restore/test/${id}`),
+  productionRestore: (id, confirmation) => client.post(`/backup/restore/production/${id}`, { confirmation }),
+  downloadEmergencyKit: () => downloadFile('/backup/emergency-kit', 'EMERGENCY_BACKUP_RECOVERY_KIT.txt'),
+  getOAuthUrl: () => client.get('/backup/oauth/url'),
+  disconnectGoogleDrive: () => client.post('/backup/oauth/disconnect'),
+  updateSettings: (data) => client.put('/backup/settings', data),
+  getGoogleDriveBackups: () => client.get('/backup/gdrive/list'),
+  inspectGoogleDriveBackup: (fileId) => client.get(`/backup/gdrive/inspect/${fileId}`),
+  restoreGoogleDriveBackup: (fileId, payload) => client.post(`/backup/gdrive/restore/${fileId}`, payload),
+};

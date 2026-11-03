@@ -376,7 +376,7 @@ async function runTest() {
           const bodyText = document.body.innerText || '';
           const isBlank = bodyText.trim().length === 0;
           const hasError = bodyText.includes('ERR_ABORTED') || bodyText.includes('net::');
-          const hasFooter = bodyText.includes('Software Development by SHOUKAT');
+          const hasFooter = bodyText.includes('Developed by SHOUKAT');
           return {
             url: window.location.pathname,
             hasRootChildren: hasContent,

@@ -8,6 +8,15 @@ export function formatDate(date) {
   return new Date(date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
+export function formatBytes(bytes, decimals = 2) {
+  if (!bytes || bytes === 0) return '0 Bytes';
+  const k = 1024;
+  const dm = decimals < 0 ? 0 : decimals;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+}
+
 export const STATUS_STYLES = {
   PAID: 'bg-emerald-500/15 text-[#16A34A] dark:text-[#34D399] dark:bg-emerald-500/20 border border-emerald-500/30 font-medium',
   PARTIAL: 'bg-amber-500/15 text-[#D97706] dark:text-[#FBBF24] dark:bg-amber-500/20 border border-amber-500/30 font-medium',

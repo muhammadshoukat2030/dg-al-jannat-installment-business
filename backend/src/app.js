@@ -27,6 +27,7 @@ const ownerExportRoutes = require('./routes/ownerExportRoutes');
 const withdrawalRoutes = require('./routes/withdrawalRoutes');
 const fundingRoutes = require('./routes/fundingRoutes');
 const syncRoutes = require('./routes/syncRoutes');
+const backupRoutes = require('./routes/backupRoutes');
 
 const app = express();
 
@@ -88,6 +89,7 @@ app.use('/api/owner-exports', ownerExportRoutes);
 app.use('/api/withdrawals', withdrawalRoutes);
 app.use('/api/funding', fundingRoutes);
 app.use('/api/sync', syncRoutes);
+app.use('/api/backup', backupRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

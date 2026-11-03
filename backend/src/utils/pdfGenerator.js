@@ -3,7 +3,12 @@ const { formatCurrency, formatDate, formatDateTime } = require('./formatHelpers'
 
 // Fixed developer branding — per explicit requirement this text is permanent,
 // never settings-derived, and never editable/removable by the Owner/Admin.
-const DEVELOPER_FOOTER_TEXT = 'Software Development by SHOUKAT | 03348004300';
+// Exact text: Developed by SHOUKAT | 03348004300 | devzore.com
+const DEVELOPER_FOOTER_TEXT = 'Developed by SHOUKAT | 03348004300 | devzore.com';
+const DEVELOPER_PHONE = '03348004300';
+const DEVELOPER_WEBSITE = 'devzore.com';
+const DEVELOPER_PHONE_URL = 'tel:03348004300';
+const DEVELOPER_WEBSITE_URL = 'https://devzore.com';
 
 /**
  * Create a new PDF document, pipe it to the response, and return the doc.
@@ -68,21 +73,26 @@ function drawHeader(doc, settings, title) {
 function finalizePdf(doc) {
   const range = doc.bufferedPageRange();
   const origBottom = doc.page.margins.bottom;
+  const accentColor = '#4F46E5'; // Subtle professional indigo accent color readable in both light and dark backgrounds
+
   for (let i = range.start; i < range.start + range.count; i += 1) {
     doc.switchToPage(i);
     // Temporarily set bottom margin to 0 so PDFKit's internal line/page check
     // does not trigger an extra blank page when stamping the footer in the margin area
     doc.page.margins.bottom = 0;
     const bottom = doc.page.height - origBottom + 12;
-    doc
-      .fontSize(8)
-      .font('Helvetica')
-      .fillColor('#888')
-      .text(DEVELOPER_FOOTER_TEXT, doc.page.margins.left, bottom, {
-        width: doc.page.width - doc.page.margins.left - doc.page.margins.right,
-        align: 'center',
-        lineBreak: false,
-      });
+    const contentWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+
+    doc.fontSize(8).font('Helvetica');
+    const totalWidth = doc.widthOfString(DEVELOPER_FOOTER_TEXT);
+    const startX = doc.page.margins.left + Math.max(0, (contentWidth - totalWidth) / 2);
+
+    doc.fillColor(accentColor);
+    doc.text('Developed by SHOUKAT | ', startX, bottom, { continued: true });
+    doc.text(DEVELOPER_PHONE, { link: DEVELOPER_PHONE_URL, continued: true });
+    doc.text(' | ', { link: null, continued: true });
+    doc.text(DEVELOPER_WEBSITE, { link: DEVELOPER_WEBSITE_URL });
+
     doc.page.margins.bottom = origBottom;
     doc.fillColor('#000');
   }
@@ -361,6 +371,7 @@ function generateCustomerFullRecordPdf(res, { settings, customer, plans, schedul
 }
 
 module.exports = {
+  DEVELOPER_FOOTER_TEXT,
   startPdf,
   drawHeader,
   drawTable,

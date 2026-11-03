@@ -20,6 +20,7 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import SyncStatusIndicator from '../components/common/SyncStatusIndicator';
+import DeveloperFooter from '../components/common/DeveloperFooter';
 
 const navItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
@@ -98,17 +99,17 @@ export default function AppLayout() {
           {!isCollapsed ? (
             <div className="flex items-center gap-2 overflow-hidden">
               <div className="w-8 h-8 rounded-lg bg-theme-primary text-white flex items-center justify-center font-bold text-sm shadow-sm shrink-0">
-                IM
+                A K
               </div>
               <span className="font-bold text-theme-primary text-sm leading-tight truncate">
-                Installment
+                AMJID 
                 <br />
-                System
+                KHAN
               </span>
             </div>
           ) : (
             <div className="mx-auto w-8 h-8 rounded-lg bg-theme-primary text-white flex items-center justify-center font-bold text-sm shadow-sm">
-              IM
+              A K
             </div>
           )}
 
@@ -194,7 +195,7 @@ export default function AppLayout() {
             >
               <Menu className="w-5 h-5" />
             </button>
-            <span className="md:hidden font-bold text-sm text-theme-primary">Installment System</span>
+            <span className="md:hidden font-bold text-sm text-theme-primary">AMJID KHAN</span>
           </div>
 
           <div className="flex items-center gap-3">
@@ -232,10 +233,8 @@ export default function AppLayout() {
             <Outlet />
           </div>
 
-          {/* Footer - Always at bottom of content */}
-          <footer className="py-4 text-center text-xs text-theme-muted border-t border-theme-border mt-8 no-print">
-            Software Development by SHOUKAT | 03348004300
-          </footer>
+          {/* Developer Branding Footer — appears on all screen views & normal prints */}
+          <DeveloperFooter />
         </main>
       </div>
     </div>

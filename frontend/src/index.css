@@ -212,8 +212,15 @@
 }
 
 @media print {
-  .no-print {
+  .no-print,
+  aside,
+  header {
     display: none !important;
+  }
+  html, body, #root, .h-screen, main {
+    height: auto !important;
+    min-height: auto !important;
+    overflow: visible !important;
   }
   html, body {
     background: white !important;
@@ -243,6 +250,30 @@
   a {
     color: #000 !important;
     text-decoration: none !important;
+  }
+
+  /* Developer Branding Footer for all printouts */
+  .developer-branding-footer {
+    display: block !important;
+    visibility: visible !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    width: 100% !important;
+    margin-top: 14px !important;
+    padding-top: 8px !important;
+    border-top: 1px solid #e5e7eb !important;
+    text-align: center !important;
+    font-size: 8pt !important;
+    line-height: 1.3 !important;
+  }
+  .developer-branding-footer,
+  .developer-branding-footer span,
+  .developer-branding-footer a {
+    color: #4f46e5 !important;
+    text-decoration: none !important;
+  }
+  .developer-branding-footer a:hover {
+    text-decoration: underline !important;
   }
   @page {
     size: A4;

@@ -37,6 +37,7 @@ function pdfContainsText(pdfBuffer, expectedText) {
       // Extract hex strings inside TJ operators e.g. [<4465> ... <...>] TJ
       const tjMatches = decompressed.match(/\[([\s\S]*?)\]\s*TJ/g);
       if (tjMatches) {
+        let fullStreamDecoded = '';
         for (const tj of tjMatches) {
           const hexParts = [];
           const hexRegex = /<([0-9a-fA-F]+)>/g;
@@ -48,8 +49,10 @@ function pdfContainsText(pdfBuffer, expectedText) {
             const combinedHex = hexParts.join('');
             const decoded = Buffer.from(combinedHex, 'hex').toString('utf8');
             if (decoded.includes(expectedText)) return true;
+            fullStreamDecoded += decoded;
           }
         }
+        if (fullStreamDecoded.includes(expectedText)) return true;
       }
     } catch (e) {
       // not a deflate stream
@@ -115,7 +118,7 @@ async function run() {
     }
   }
 
-  const expectedFooter = 'Software Development by SHOUKAT | 03348004300';
+  const expectedFooter = 'Developed by SHOUKAT | 03348004300 | devzore.com';
 
   await test('summaryPdf generates valid PDF with developer footer', async () => {
     const { res } = createMockRes();
