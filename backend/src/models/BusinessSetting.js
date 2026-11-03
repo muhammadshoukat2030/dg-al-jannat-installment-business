@@ -9,6 +9,7 @@ const businessSettingSchema = new mongoose.Schema(
     whatsapp: { type: String, default: '' },
     email: { type: String, default: '' },
     website: { type: String, default: '' },
+    city: { type: String, default: '' },
     address: { type: String, default: '' },
     description: { type: String, default: '' },
     logoUrl: { type: String, default: '' },
