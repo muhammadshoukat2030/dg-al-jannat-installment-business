@@ -4,10 +4,11 @@ let isConnected = false;
 
 async function connectDB() {
   if (isConnected) return mongoose.connection;
-  if (!process.env.MONGODB_URI) {
-    throw new Error('MONGODB_URI is not set in environment variables');
+  const mongoUri = process.env.MONGODB_URI || process.env.MONGO_URI;
+  if (!mongoUri) {
+    throw new Error('Neither MONGODB_URI nor MONGO_URI is set in environment variables');
   }
-  const conn = await mongoose.connect(process.env.MONGODB_URI, {
+  const conn = await mongoose.connect(mongoUri, {
     maxPoolSize: 10,
   });
   isConnected = conn.connections[0].readyState === 1;

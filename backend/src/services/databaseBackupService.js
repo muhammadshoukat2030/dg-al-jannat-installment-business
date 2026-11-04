@@ -125,7 +125,7 @@ async function createDatabaseBackup({
   }).catch(() => {});
 
   try {
-    const dbUri = customDbUri || process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/installment_management3';
+    const dbUri = customDbUri || process.env.MONGODB_URI || process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/installment_management3';
 
     // 1. Gather comprehensive database manifest before dump
     const dbStats = await inspectDatabase();
@@ -173,8 +173,8 @@ async function createDatabaseBackup({
 
     const fullPackage = Buffer.concat([manifestLenHeader, manifestJsonBuffer, plainArchiveBuffer]);
 
-    // 5. Encrypt with AES-256-GCM
-    const encryptionResult = cryptoService.encryptBuffer(fullPackage);
+    // 5. Encrypt with AES-256-GCM using unique per-archive cryptographic salt
+    const encryptionResult = cryptoService.encryptArchiveBuffer(fullPackage);
     const encryptedBuffer = encryptionResult.encryptedBuffer;
     const encryptedSizeBytes = encryptedBuffer.length;
 
@@ -213,6 +213,8 @@ async function createDatabaseBackup({
       isLocalKept: keepLocal,
       encryption: {
         algorithm: 'aes-256-gcm',
+        version: encryptionResult.version || '2.0-salt',
+        saltHex: encryptionResult.saltHex || '',
         ivHex: encryptionResult.ivHex,
         authTagHex: encryptionResult.authTagHex,
         keyFingerprint: encryptionResult.keyFingerprint,

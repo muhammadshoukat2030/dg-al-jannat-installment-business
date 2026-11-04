@@ -88,7 +88,7 @@ export default function BackupManager() {
 
   function handleDownloadKit() {
     backupApi.downloadEmergencyKit();
-    toast.success('Emergency Recovery Kit downloaded.');
+    toast.success('Emergency Recovery Guide downloaded. For security, raw master keys can only be exported via the server terminal.');
   }
 
   async function handleDisconnectGoogle() {

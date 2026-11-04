@@ -5,6 +5,7 @@ const Withdrawal = require('../models/Withdrawal');
 const asyncHandler = require('../middleware/asyncHandler');
 const investorService = require('../services/investorService');
 const accountingService = require('../services/accountingService');
+const { escapeRegex } = require('../utils/regexHelper');
 
 async function generateInvestorId() {
   const latest = await Investor.findOne({}, { investorId: 1 }).sort({ investorId: -1 });
@@ -23,12 +24,13 @@ const listInvestors = asyncHandler(async (req, res) => {
   if (status === 'archived') query.isArchived = true;
   else if (status === 'active') query.isArchived = false;
 
-  if (search) {
+  if (search && search.trim()) {
+    const safeSearch = escapeRegex(search.trim());
     query.$or = [
-      { name: { $regex: search, $options: 'i' } },
-      { phone: { $regex: search, $options: 'i' } },
-      { cnic: { $regex: search, $options: 'i' } },
-      { investorId: { $regex: search, $options: 'i' } },
+      { name: { $regex: safeSearch, $options: 'i' } },
+      { phone: { $regex: safeSearch, $options: 'i' } },
+      { cnic: { $regex: safeSearch, $options: 'i' } },
+      { investorId: { $regex: safeSearch, $options: 'i' } },
     ];
   }
 
@@ -68,7 +70,23 @@ const createInvestor = asyncHandler(async (req, res) => {
     return res.status(400).json({ success: false, message: 'Name and phone are required.' });
   }
   const investorId = await generateInvestorId();
-  const investor = await Investor.create({ ...req.body, investorId });
+
+  // SEC-09: Whitelist allowed fields to prevent mass assignment
+  const investorData = {
+    investorId,
+    name: req.body.name,
+    phone: req.body.phone,
+    whatsapp: req.body.whatsapp || '',
+    email: req.body.email || '',
+    cnic: req.body.cnic || '',
+    address: req.body.address || '',
+    notes: req.body.notes || '',
+    status: req.body.status === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE',
+    operationId: req.body.operationId || undefined,
+    isArchived: req.body.isArchived === true,
+  };
+
+  const investor = await Investor.create(investorData);
   res.status(201).json({ success: true, data: investor });
 });
 
@@ -76,8 +94,23 @@ const updateInvestor = asyncHandler(async (req, res) => {
   const investor = await Investor.findById(req.params.id);
   if (!investor || investor.isDeleted) return res.status(404).json({ success: false, message: 'Investor not found.' });
 
-  const { investorId, isDeleted, _id, createdAt, updatedAt, __v, ...updatable } = req.body;
-  Object.assign(investor, updatable);
+  // SEC-09: Whitelist allowed updatable fields
+  const allowedFields = [
+    'name',
+    'phone',
+    'whatsapp',
+    'email',
+    'cnic',
+    'address',
+    'notes',
+    'status',
+    'isArchived',
+  ];
+  for (const field of allowedFields) {
+    if (req.body[field] !== undefined) {
+      investor[field] = req.body[field];
+    }
+  }
   await investor.save();
   res.json({ success: true, data: investor });
 });

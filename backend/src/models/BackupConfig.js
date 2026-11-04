@@ -63,7 +63,17 @@ const backupConfigSchema = new mongoose.Schema(
       lastVerifiedAt: { type: Date, default: null },
     },
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+    toJSON: {
+      transform: (doc, ret) => {
+        if (ret.googleDrive && ret.googleDrive.tokens) {
+          delete ret.googleDrive.tokens;
+        }
+        return ret;
+      },
+    },
+  }
 );
 
 module.exports = mongoose.model('BackupConfig', backupConfigSchema);

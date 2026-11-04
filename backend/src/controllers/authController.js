@@ -20,16 +20,25 @@ const login = asyncHandler(async (req, res) => {
   } catch {}
 
   if (!admin) {
-    // If admins collection is empty (e.g. database wiped or deleted), verify against environment disaster admin
+    // If admins collection is empty (e.g. unseeded database or disaster recovery),
+    // only permit emergency login if explicit, non-default environment credentials are configured.
     const adminCount = await Admin.countDocuments().catch(() => 0);
-    const envEmail = (process.env.ADMIN_EMAIL || 'admin@localhost.com').toLowerCase();
-    const envPass = process.env.ADMIN_PASSWORD || '12345';
-    const envSetupKey = process.env.ADMIN_SETUP_KEY || 'setup12345';
+    const envEmail = process.env.ADMIN_EMAIL ? process.env.ADMIN_EMAIL.trim().toLowerCase() : null;
+    const envPass = process.env.ADMIN_PASSWORD ? process.env.ADMIN_PASSWORD.trim() : null;
+    const envSetupKey = process.env.ADMIN_SETUP_KEY ? process.env.ADMIN_SETUP_KEY.trim() : null;
+
+    // Explicitly reject known default weak fallback credentials
+    const isWeakDefault =
+      envEmail === 'admin@localhost.com' ||
+      envPass === '12345' ||
+      envSetupKey === 'setup12345';
 
     if (
       adminCount === 0 &&
+      envEmail &&
+      !isWeakDefault &&
       email.toLowerCase() === envEmail &&
-      (password === envPass || password === envSetupKey)
+      ((envPass && password === envPass) || (envSetupKey && password === envSetupKey))
     ) {
       const emergencyAdmin = {
         _id: 'emergency_admin',

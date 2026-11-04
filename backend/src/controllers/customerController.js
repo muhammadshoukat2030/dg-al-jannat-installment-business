@@ -5,6 +5,7 @@ const Payment = require('../models/Payment');
 const MissedInstallmentEvent = require('../models/MissedInstallmentEvent');
 const asyncHandler = require('../middleware/asyncHandler');
 const { generateCustomerId } = require('../utils/idGenerator');
+const { escapeRegex } = require('../utils/regexHelper');
 
 const listCustomers = asyncHandler(async (req, res) => {
   const { search, status, page = 1, limit = 20 } = req.query;
@@ -14,19 +15,20 @@ const listCustomers = asyncHandler(async (req, res) => {
   if (status === 'archived') query.isArchived = true;
   else if (status === 'active') query.isArchived = false;
 
-  if (search) {
+  if (search && search.trim()) {
+    const safeSearch = escapeRegex(search.trim());
     // Also match customers whose non-deleted contracts/plans match the search term
     const matchingPlans = await InstallmentPlan.find(
-      { productName: { $regex: search, $options: 'i' }, isDeleted: { $ne: true } },
+      { productName: { $regex: safeSearch, $options: 'i' }, isDeleted: { $ne: true } },
       'customerId'
     ).lean();
     const matchingCustomerIds = matchingPlans.map((p) => p.customerId).filter(Boolean);
 
     query.$or = [
-      { name: { $regex: search, $options: 'i' } },
-      { contactNumber: { $regex: search, $options: 'i' } },
-      { cnic: { $regex: search, $options: 'i' } },
-      { customerId: { $regex: search, $options: 'i' } },
+      { name: { $regex: safeSearch, $options: 'i' } },
+      { contactNumber: { $regex: safeSearch, $options: 'i' } },
+      { cnic: { $regex: safeSearch, $options: 'i' } },
+      { customerId: { $regex: safeSearch, $options: 'i' } },
       { _id: { $in: matchingCustomerIds } },
     ];
   }
@@ -120,8 +122,25 @@ const createCustomer = asyncHandler(async (req, res) => {
   }
 
   const customerId = await generateCustomerId();
+
+  // SEC-09: Explicit field whitelisting to prevent mass assignment
+  const customerData = {
+    customerId,
+    name: req.body.name,
+    fatherName: req.body.fatherName || '',
+    cnic: req.body.cnic || '',
+    contactNumber: req.body.contactNumber,
+    alternateContact: req.body.alternateContact || '',
+    email: req.body.email || '',
+    address: req.body.address || '',
+    city: req.body.city || '',
+    notes: req.body.notes || '',
+    isArchived: req.body.isArchived === true,
+    operationId: operationId || undefined,
+  };
+
   try {
-    const customer = await Customer.create({ ...req.body, customerId, operationId: operationId || undefined });
+    const customer = await Customer.create(customerData);
     res.status(201).json({ success: true, data: customer });
   } catch (err) {
     if (err.code === 11000 && operationId && (err.keyPattern?.operationId || err.message?.includes('operationId'))) {
@@ -153,8 +172,24 @@ const updateCustomer = asyncHandler(async (req, res) => {
     }
   }
 
-  const { customerId, isDeleted, _id, createdAt, updatedAt, __v, lastKnownUpdatedAt, operationId, ...updatable } = req.body;
-  Object.assign(customer, updatable);
+  // SEC-09: Whitelist allowed fields for customer updates
+  const allowedFields = [
+    'name',
+    'fatherName',
+    'cnic',
+    'contactNumber',
+    'alternateContact',
+    'email',
+    'address',
+    'city',
+    'notes',
+    'isArchived',
+  ];
+  for (const field of allowedFields) {
+    if (req.body[field] !== undefined) {
+      customer[field] = req.body[field];
+    }
+  }
   await customer.save();
   res.json({ success: true, data: customer });
 });

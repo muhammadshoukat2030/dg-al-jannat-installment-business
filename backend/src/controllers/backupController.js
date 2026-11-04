@@ -6,6 +6,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const asyncHandler = require('../middleware/asyncHandler');
 const BackupConfig = require('../models/BackupConfig');
 const BackupRecord = require('../models/BackupRecord');
@@ -14,6 +15,7 @@ const cryptoService = require('../services/cryptoService');
 const databaseBackupService = require('../services/databaseBackupService');
 const googleDriveService = require('../services/googleDriveService');
 const backupSchedulerService = require('../services/backupSchedulerService');
+const { escapeRegex } = require('../utils/regexHelper');
 
 /**
  * Helper to ensure a BackupConfig document exists.
@@ -146,7 +148,7 @@ const getBackupHistory = asyncHandler(async (req, res) => {
   }
 
   if (search && search.trim()) {
-    const s = search.trim();
+    const s = escapeRegex(search.trim());
     query.$or = [{ backupId: { $regex: s, $options: 'i' } }, { filename: { $regex: s, $options: 'i' } }];
   }
 
@@ -393,11 +395,13 @@ const productionRestoreBackup = asyncHandler(async (req, res) => {
 });
 
 // 8. GET /api/backup/emergency-kit
+// For strict security compliance, raw cryptographic master keys are NEVER transmitted over HTTP.
+// This endpoint returns the Disaster Recovery Guide with verification fingerprint and terminal export instructions.
 const downloadEmergencyRecoveryKit = asyncHandler(async (req, res) => {
   const kit = cryptoService.generateEmergencyRecoveryKit();
 
   await BackupAuditLog.create({
-    action: 'EMERGENCY_KIT_DOWNLOADED',
+    action: 'EMERGENCY_RECOVERY_GUIDE_DOWNLOADED',
     status: 'SUCCESS',
     adminId: req.admin?._id,
     ip: req.ip,
@@ -405,34 +409,50 @@ const downloadEmergencyRecoveryKit = asyncHandler(async (req, res) => {
 
   const textContent = `
 ================================================================================
-${kit.title}
+INSTALLMENT MANAGEMENT SYSTEM — EMERGENCY RECOVERY PROCEDURE & SECURITY GUIDE
 ================================================================================
 Generated: ${kit.generatedAt}
 Algorithm: ${kit.algorithm}
 Key Fingerprint: ${kit.keyFingerprint}
 
-MASTER ENCRYPTION KEY (HEX):
+[SECURITY ENFORCEMENT NOTICE]
 --------------------------------------------------------------------------------
-${kit.masterKeyHex}
---------------------------------------------------------------------------------
+To strictly protect database confidentiality, raw 256-bit cryptographic master
+keys are NEVER returned or transmitted over HTTP/network endpoints.
 
-CRITICAL INSTRUCTIONS:
-${kit.instructions.join('\n')}
+HOW TO SAFELY EXPORT YOUR MASTER ENCRYPTION KEY (TERMINAL ONLY):
+--------------------------------------------------------------------------------
+Log in directly to your secure server console or terminal and execute:
+
+  node backend/scripts/export-emergency-kit.js
+
+Or to write the recovery document directly to a secure offline drive or safe:
+
+  node backend/scripts/export-emergency-kit.js --output C:\\Safe\\recovery.txt
+
+CRITICAL DISASTER RECOVERY INSTRUCTIONS:
+1. KEEP THIS DOCUMENT IN A SECURE LOCATION (e.g. Password Manager or Physical Safe).
+2. If your server is destroyed or MongoDB database is accidentally deleted, you will need your key to decrypt backups.
+3. Backups are cryptographically signed with AES-256-GCM. Modifying any byte will cause authentication tag failure.
+4. You can also decrypt your backup using the included Node.js offline recovery script.
 
 ================================================================================
-KEEP THIS KIT SAFE AND CONFIDENTIAL. NEVER COMMIT THIS FILE TO GIT.
+KEEP THIS PROCEDURE CONFIDENTIAL. NEVER COMMIT RECOVERY KEYS TO GIT.
 ================================================================================
 `.trim();
 
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-  res.setHeader('Content-Disposition', 'attachment; filename="EMERGENCY_BACKUP_RECOVERY_KIT.txt"');
+  res.setHeader('Content-Disposition', 'attachment; filename="EMERGENCY_RECOVERY_GUIDE.txt"');
   res.send(textContent);
 });
 
 // 9. GET /api/backup/oauth/url
 const getGoogleOAuthUrl = asyncHandler(async (req, res) => {
   try {
-    const url = googleDriveService.getAuthorizationUrl();
+    const { url } = googleDriveService.getAuthorizationUrl();
     res.json({ success: true, url });
   } catch (err) {
     res.status(400).json({ success: false, message: err.message });
@@ -441,11 +461,18 @@ const getGoogleOAuthUrl = asyncHandler(async (req, res) => {
 
 // 10. GET /api/backup/oauth/callback
 const handleGoogleOAuthCallback = asyncHandler(async (req, res) => {
-  const { code, error } = req.query;
+  const { code, error, state } = req.query;
   const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
 
   if (error || !code) {
     return res.redirect(`${clientUrl}/settings?tab=backup&error=${encodeURIComponent(error || 'Access denied by user')}`);
+  }
+
+  // Validate OAuth state to prevent CSRF
+  const stateCheck = googleDriveService.validateAndConsumeOAuthState(state);
+  if (!stateCheck.isValid) {
+    console.warn('[GoogleOAuth] Rejected callback due to invalid state:', stateCheck.error);
+    return res.redirect(`${clientUrl}/settings?tab=backup&error=${encodeURIComponent(stateCheck.error)}`);
   }
 
   try {
@@ -453,16 +480,39 @@ const handleGoogleOAuthCallback = asyncHandler(async (req, res) => {
     const profile = await googleDriveService.getUserProfile(tokens.access_token);
     const folderId = await googleDriveService.getOrCreateBackupFolder(tokens.access_token);
 
+    // Encrypt tokens before saving to database
+    const encryptedTokens = {
+      access_token: cryptoService.encryptSecretText(tokens.access_token),
+      refresh_token: cryptoService.encryptSecretText(tokens.refresh_token),
+      expiry_date: tokens.expiry_date,
+      scope: tokens.scope,
+      token_type: tokens.token_type,
+    };
+
     const config = await getOrCreateConfig();
     config.googleDrive = {
       isConnected: true,
       email: profile?.email || 'Unknown',
       folderId,
       folderName: googleDriveService.FOLDER_NAME,
-      tokens,
+      tokens: encryptedTokens,
       lastCheckedAt: new Date(),
     };
     await config.save();
+
+    // Persist encrypted tokens to disk for offline disaster recovery
+    googleDriveService.saveTokensToDisk({
+      isConnected: true,
+      email: profile?.email || 'Unknown',
+      folderId,
+      folderName: googleDriveService.FOLDER_NAME,
+      tokens: {
+        access_token: tokens.access_token,
+        refresh_token: tokens.refresh_token,
+        expiry_date: tokens.expiry_date,
+      },
+      lastCheckedAt: new Date(),
+    });
 
     await BackupAuditLog.create({
       action: 'GOOGLE_DRIVE_CONNECTED',
@@ -480,7 +530,8 @@ const handleGoogleOAuthCallback = asyncHandler(async (req, res) => {
 // 11. POST /api/backup/oauth/disconnect
 const disconnectGoogleDrive = asyncHandler(async (req, res) => {
   const config = await getOrCreateConfig();
-  const token = config.googleDrive?.tokens?.access_token || config.googleDrive?.tokens?.refresh_token;
+  const rawToken = config.googleDrive?.tokens?.access_token || config.googleDrive?.tokens?.refresh_token;
+  const token = cryptoService.decryptSecretText(rawToken);
 
   if (token) {
     await googleDriveService.revokeTokens(token).catch(() => {});
@@ -542,11 +593,28 @@ const updateBackupSettings = asyncHandler(async (req, res) => {
 // 13. POST /api/backup/cron
 const triggerCronBackup = asyncHandler(async (req, res) => {
   const cronSecret = process.env.BACKUP_CRON_SECRET;
-  const authHeader = req.headers.authorization;
+  if (!cronSecret || cronSecret.trim().length === 0) {
+    return res.status(503).json({
+      success: false,
+      message: 'Automated backup webhook is not configured. BACKUP_CRON_SECRET must be set in server environment variables.',
+    });
+  }
 
-  // Verify secret if configured
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
-    return res.status(401).json({ success: false, message: 'Unauthorized cron trigger.' });
+  const authHeader = req.headers.authorization || '';
+  const expectedAuth = `Bearer ${cronSecret.trim()}`;
+
+  const authBuffer = Buffer.from(authHeader);
+  const expectedBuffer = Buffer.from(expectedAuth);
+
+  const isMatch =
+    authBuffer.length === expectedBuffer.length &&
+    crypto.timingSafeEqual(authBuffer, expectedBuffer);
+
+  if (!isMatch) {
+    return res.status(401).json({
+      success: false,
+      message: 'Unauthorized cron trigger. Invalid or missing secret.',
+    });
   }
 
   const record = await backupSchedulerService.executeScheduledBackup('SCHEDULED_DAILY');

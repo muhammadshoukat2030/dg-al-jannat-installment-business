@@ -65,7 +65,7 @@ export default function BackupOverview({
             onClick={onDownloadKit}
           >
             <KeyRound className="w-3.5 h-3.5 text-amber-500" />
-            Emergency Key Kit
+            Recovery Guide
           </button>
           <button
             type="button"

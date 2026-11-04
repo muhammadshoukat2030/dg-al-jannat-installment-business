@@ -37,8 +37,12 @@ coverage/
 backend/backups/
 backups/
 backend/bin/
-backend/.google_drive_tokens.json
-.google_drive_tokens.json
+*.imsbak
+*.imsbak.*
+*.imsbak.enc
+*.imsbak.json
+backend/.google_drive_tokens.json*
+.google_drive_tokens.json*
 
 # Misc
 *.zip
