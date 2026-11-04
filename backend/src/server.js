@@ -22,6 +22,8 @@ async function start() {
   }
 }
 
-start();
+if (!process.env.VERCEL) {
+  start();
+}
 
 module.exports = app;

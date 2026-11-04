@@ -54,12 +54,13 @@ async function verifyAll() {
     'Admin', 'Owner', 'Customer', 'InstallmentPlan', 'Installment',
     'Payment', 'Investor', 'InvestorTransaction', 'Withdrawal',
     'OwnerTransaction', 'FundingAllocation', 'BusinessSetting',
-    'MissedInstallmentEvent', 'ProfitDistribution'
+    'MissedInstallmentEvent', 'ProfitDistribution',
+    'BackupConfig', 'BackupRecord', 'BackupAuditLog'
   ];
 
   const allModelsPresent = expectedModels.every((m) => registeredModels.includes(m));
   report.check1 = {
-    status: allModelsPresent && registeredModels.length === 14 ? 'PASS' : 'FAIL',
+    status: allModelsPresent && registeredModels.length === 17 ? 'PASS' : 'FAIL',
     totalModels: registeredModels.length,
     modelCollectionMap,
   };

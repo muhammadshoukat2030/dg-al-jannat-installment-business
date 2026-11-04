@@ -1,7 +1,11 @@
 import axios from 'axios';
 
+const defaultBaseURL = import.meta.env.PROD ? '/api' : 'http://localhost:5000/api';
+const rawBaseURL = import.meta.env.VITE_API_URL || defaultBaseURL;
+const baseURL = (typeof rawBaseURL === 'string' ? rawBaseURL : '').trim().replace(/\/+$/, '');
+
 const client = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5000/api',
+  baseURL,
   timeout: 15000,
 });
 

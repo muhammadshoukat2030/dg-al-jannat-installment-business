@@ -3,14 +3,17 @@
  * Usage: npm run setup-admin
  * Reads ADMIN_NAME, ADMIN_EMAIL, ADMIN_PASSWORD, ADMIN_SETUP_KEY from .env
  */
+const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
 require('dotenv').config();
 const mongoose = require('mongoose');
 const Admin = require('../src/models/Admin');
 
 async function run() {
-  const { MONGODB_URI, ADMIN_NAME, ADMIN_EMAIL, ADMIN_PASSWORD, ADMIN_SETUP_KEY } = process.env;
+  const mongoUri = process.env.MONGODB_URI || process.env.MONGO_URI;
+  const { ADMIN_NAME, ADMIN_EMAIL, ADMIN_PASSWORD, ADMIN_SETUP_KEY } = process.env;
 
-  if (!MONGODB_URI) throw new Error('MONGODB_URI is not set.');
+  if (!mongoUri) throw new Error('Neither MONGODB_URI nor MONGO_URI is set.');
   if (!ADMIN_NAME || !ADMIN_EMAIL || !ADMIN_PASSWORD) {
     throw new Error('ADMIN_NAME, ADMIN_EMAIL and ADMIN_PASSWORD must be set in .env');
   }
@@ -18,7 +21,7 @@ async function run() {
     throw new Error('ADMIN_SETUP_KEY must be set in .env as a safety confirmation before creating the admin.');
   }
 
-  await mongoose.connect(MONGODB_URI);
+  await mongoose.connect(mongoUri);
 
   const existing = await Admin.findOne({ email: ADMIN_EMAIL.toLowerCase() });
   if (existing) {
