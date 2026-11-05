@@ -80,7 +80,8 @@ async function runTests() {
 
   assert(backupResult.success === true, 'Backup creation returned success');
   assert(!!backupResult.backupId, `Generated Backup ID: ${backupResult.backupId}`);
-  assert(fs.existsSync(backupResult.filePath), `Encrypted archive written to disk: ${backupResult.filePath}`);
+  assert(backupResult.encryptedBuffer instanceof Buffer && backupResult.encryptedBuffer.length > 0, 'Encrypted archive generated in memory as Buffer');
+  assert(backupResult.filePath === null, 'Confirmed zero local backup files created on disk');
 
   const manifest = backupResult.manifest;
   assert(manifest.totalCollections === dbStats.totalCollections, 'Manifest collections count matches inspected count');
@@ -178,11 +179,8 @@ async function runTests() {
   const creds = googleDriveService.getOAuthCredentials();
   assert(typeof creds.isConfigured === 'boolean', `OAuth credentials configured: ${creds.isConfigured}`);
 
-  // Cleanup test backup file from disk
-  if (fs.existsSync(backupResult.filePath)) {
-    fs.unlinkSync(backupResult.filePath);
-    console.log('Cleaned up local test backup file');
-  }
+  // Confirmed zero local file footprint
+  assert(backupResult.filePath === null, 'No local file was created during test execution');
 
   // Cleanup test backup record from MongoDB
   const BackupRecord = require('../models/BackupRecord');

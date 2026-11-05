@@ -172,16 +172,15 @@ const createManualBackup = asyncHandler(async (req, res) => {
   const adminId = req.admin?._id;
   const config = await getOrCreateConfig();
 
-  // 1. Generate local encrypted backup
+  // 1. Generate encrypted backup in memory (zero local files generated)
   const backupResult = await databaseBackupService.createDatabaseBackup({
     type: 'MANUAL',
     createdBy: adminId,
-    keepLocal: true,
   });
 
   const record = backupResult.record;
 
-  // 2. Upload to Google Drive if connected
+  // 2. Upload directly to Google Drive if connected
   let gdriveUpload = null;
   if (config.googleDrive?.isConnected) {
     try {
@@ -222,9 +221,13 @@ const createManualBackup = asyncHandler(async (req, res) => {
     }
   }
 
+  const successMessage = gdriveUpload
+    ? 'Encrypted backup created and saved directly to Google Drive.'
+    : 'Encrypted backup created successfully in memory.';
+
   res.status(201).json({
     success: true,
-    message: 'Encrypted backup created successfully.',
+    message: successMessage,
     data: {
       backupId: record.backupId,
       filename: record.filename,
@@ -246,12 +249,12 @@ const verifyBackup = asyncHandler(async (req, res) => {
   const record = await BackupRecord.findOne({ backupId: req.params.id });
   if (!record) return res.status(404).json({ success: false, message: 'Backup record not found.' });
 
-  // Resolve encrypted buffer: local file or download from Google Drive
+  // Resolve encrypted buffer from Google Drive (or historical local file fallback)
   let buffer = null;
-  if (record.localPath && fs.existsSync(record.localPath)) {
+  if (record.googleDrive?.fileId) {
+    buffer = await googleDriveService.downloadBackupFile(record.googleDrive.fileId).catch(() => null);
+  } else if (!process.env.VERCEL && record.localPath && fs.existsSync(record.localPath)) {
     buffer = fs.readFileSync(record.localPath);
-  } else if (record.googleDrive?.fileId) {
-    buffer = await googleDriveService.downloadBackupFile(record.googleDrive.fileId);
   }
 
   if (!buffer) {
@@ -305,10 +308,10 @@ const downloadBackup = asyncHandler(async (req, res) => {
   if (!record) return res.status(404).json({ success: false, message: 'Backup record not found.' });
 
   let buffer = null;
-  if (record.localPath && fs.existsSync(record.localPath)) {
+  if (record.googleDrive?.fileId) {
+    buffer = await googleDriveService.downloadBackupFile(record.googleDrive.fileId).catch(() => null);
+  } else if (!process.env.VERCEL && record.localPath && fs.existsSync(record.localPath)) {
     buffer = fs.readFileSync(record.localPath);
-  } else if (record.googleDrive?.fileId) {
-    buffer = await googleDriveService.downloadBackupFile(record.googleDrive.fileId);
   }
 
   if (!buffer) {
@@ -327,10 +330,10 @@ const testRestoreBackup = asyncHandler(async (req, res) => {
   if (!record) return res.status(404).json({ success: false, message: 'Backup record not found.' });
 
   let buffer = null;
-  if (record.localPath && fs.existsSync(record.localPath)) {
+  if (record.googleDrive?.fileId) {
+    buffer = await googleDriveService.downloadBackupFile(record.googleDrive.fileId).catch(() => null);
+  } else if (!process.env.VERCEL && record.localPath && fs.existsSync(record.localPath)) {
     buffer = fs.readFileSync(record.localPath);
-  } else if (record.googleDrive?.fileId) {
-    buffer = await googleDriveService.downloadBackupFile(record.googleDrive.fileId);
   }
 
   if (!buffer) {
@@ -369,10 +372,10 @@ const productionRestoreBackup = asyncHandler(async (req, res) => {
   if (!record) return res.status(404).json({ success: false, message: 'Backup record not found.' });
 
   let buffer = null;
-  if (record.localPath && fs.existsSync(record.localPath)) {
+  if (record.googleDrive?.fileId) {
+    buffer = await googleDriveService.downloadBackupFile(record.googleDrive.fileId).catch(() => null);
+  } else if (!process.env.VERCEL && record.localPath && fs.existsSync(record.localPath)) {
     buffer = fs.readFileSync(record.localPath);
-  } else if (record.googleDrive?.fileId) {
-    buffer = await googleDriveService.downloadBackupFile(record.googleDrive.fileId);
   }
 
   if (!buffer) {
@@ -590,27 +593,33 @@ const updateBackupSettings = asyncHandler(async (req, res) => {
   res.json({ success: true, message: 'Backup settings updated.', data: config });
 });
 
-// 13. POST /api/backup/cron
+// 13. POST/GET /api/backup/cron
 const triggerCronBackup = asyncHandler(async (req, res) => {
-  const cronSecret = process.env.BACKUP_CRON_SECRET;
+  const cronSecret = process.env.CRON_SECRET || process.env.BACKUP_CRON_SECRET;
   if (!cronSecret || cronSecret.trim().length === 0) {
     return res.status(503).json({
       success: false,
-      message: 'Automated backup webhook is not configured. BACKUP_CRON_SECRET must be set in server environment variables.',
+      message: 'Automated backup webhook is not configured. CRON_SECRET or BACKUP_CRON_SECRET must be set in server environment variables.',
     });
   }
 
   const authHeader = req.headers.authorization || '';
   const expectedAuth = `Bearer ${cronSecret.trim()}`;
+  const querySecret = typeof req.query?.secret === 'string' ? req.query.secret.trim() : '';
 
   const authBuffer = Buffer.from(authHeader);
   const expectedBuffer = Buffer.from(expectedAuth);
 
-  const isMatch =
+  const isBearerMatch =
     authBuffer.length === expectedBuffer.length &&
     crypto.timingSafeEqual(authBuffer, expectedBuffer);
 
-  if (!isMatch) {
+  const isQueryMatch =
+    querySecret.length > 0 &&
+    Buffer.from(querySecret).length === Buffer.from(cronSecret.trim()).length &&
+    crypto.timingSafeEqual(Buffer.from(querySecret), Buffer.from(cronSecret.trim()));
+
+  if (!isBearerMatch && !isQueryMatch) {
     return res.status(401).json({
       success: false,
       message: 'Unauthorized cron trigger. Invalid or missing secret.',
@@ -635,36 +644,21 @@ const getGoogleDriveBackups = asyncHandler(async (req, res) => {
     });
   }
 
-  // Enrich backup list with local metadata / manifests if available
-  const BACKUPS_DIR = databaseBackupService.BACKUPS_DIR;
+  // Enrich backup list with metadata from MongoDB Atlas BackupRecord
   const enriched = await Promise.all(
     result.backups.map(async (b) => {
       let manifest = null;
-      // Try local file first
-      const localFile = path.join(BACKUPS_DIR, b.fileName);
-      if (fs.existsSync(localFile)) {
-        try {
-          const buf = fs.readFileSync(localFile);
-          const v = databaseBackupService.verifyEncryptedArchive(buf);
-          if (v.isValid) {
-            manifest = v.manifest;
-          }
-        } catch {}
-      }
 
-      // If no local manifest, try BackupRecord in DB
-      if (!manifest) {
-        try {
-          const rec = await BackupRecord.findOne({ backupId: b.backupId });
-          if (rec) {
-            manifest = {
-              totalCollections: rec.totalCollections,
-              totalDocuments: rec.totalDocuments,
-              collections: rec.collectionsSummary,
-            };
-          }
-        } catch {}
-      }
+      try {
+        const rec = await BackupRecord.findOne({ backupId: b.backupId });
+        if (rec) {
+          manifest = {
+            totalCollections: rec.totalCollections,
+            totalDocuments: rec.totalDocuments,
+            collections: rec.collectionsSummary,
+          };
+        }
+      } catch {}
 
       return {
         ...b,
@@ -686,32 +680,12 @@ const getGoogleDriveBackups = asyncHandler(async (req, res) => {
 });
 
 // 15. GET /api/backup/gdrive/inspect/:fileId
-// Downloads/inspects the backup archive and verifies encryption, returning collection inventory
+// Downloads/inspects the backup archive directly from Google Drive into memory
 const inspectGoogleDriveBackup = asyncHandler(async (req, res) => {
   const { fileId } = req.params;
-  const BACKUPS_DIR = databaseBackupService.BACKUPS_DIR;
 
-  // 1. Check if backup is already on local disk
-  let buffer = null;
-  const record = await BackupRecord.findOne({ 'googleDrive.fileId': fileId }).catch(() => null);
-  if (record && record.localPath && fs.existsSync(record.localPath)) {
-    buffer = fs.readFileSync(record.localPath);
-  }
-
-  if (!buffer && fs.existsSync(BACKUPS_DIR)) {
-    const localFiles = fs.readdirSync(BACKUPS_DIR);
-    for (const f of localFiles) {
-      if (f.endsWith('.imsbak') && (f.includes(fileId) || (record && f === record.filename))) {
-        buffer = fs.readFileSync(path.join(BACKUPS_DIR, f));
-        break;
-      }
-    }
-  }
-
-  // 2. Download from Google Drive if not locally cached
-  if (!buffer) {
-    buffer = await googleDriveService.downloadBackupFile(fileId);
-  }
+  // 1. Download directly from Google Drive into memory
+  const buffer = await googleDriveService.downloadBackupFile(fileId);
 
   if (!buffer) {
     return res.status(404).json({ success: false, message: 'Backup file could not be retrieved from Google Drive.' });
@@ -765,27 +739,13 @@ const restoreGoogleDriveBackup = asyncHandler(async (req, res) => {
     }
   }
 
-  // 1. Retrieve backup buffer (local cache or download from Google Drive)
-  let buffer = null;
-  const BACKUPS_DIR = databaseBackupService.BACKUPS_DIR;
-
-  const record = await BackupRecord.findOne({ 'googleDrive.fileId': fileId }).catch(() => null);
-  if (record && record.localPath && fs.existsSync(record.localPath)) {
-    buffer = fs.readFileSync(record.localPath);
-  }
-
-  if (!buffer && fs.existsSync(BACKUPS_DIR)) {
-    const localFiles = fs.readdirSync(BACKUPS_DIR);
-    for (const f of localFiles) {
-      if (f.endsWith('.imsbak') && (f.includes(fileId) || (record && f === record.filename))) {
-        buffer = fs.readFileSync(path.join(BACKUPS_DIR, f));
-        break;
-      }
-    }
-  }
-
+  // 1. Retrieve backup buffer directly from Google Drive into memory
+  let buffer = await googleDriveService.downloadBackupFile(fileId);
   if (!buffer) {
-    buffer = await googleDriveService.downloadBackupFile(fileId);
+    const record = await BackupRecord.findOne({ 'googleDrive.fileId': fileId }).catch(() => null);
+    if (!process.env.VERCEL && record && record.localPath && fs.existsSync(record.localPath)) {
+      buffer = fs.readFileSync(record.localPath);
+    }
   }
 
   if (!buffer) {

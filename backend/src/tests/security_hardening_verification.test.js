@@ -51,15 +51,15 @@ async function runTests() {
     await connectDB();
 
     // --------------------------------------------------------------------------
-    // TEST 1: SEC-01 Git Tracking Verification
+    // TEST 1: SEC-01 Git Tracking Verification & Local Backup Elimination
     // --------------------------------------------------------------------------
     console.log('\n--- 1. SEC-01: Git Tracking and Sensitive Backup Files ---');
     const { execSync } = require('child_process');
-    const trackedBackups = execSync('git ls-files backend/backups/backup_1793114831900', { encoding: 'utf-8' }).trim();
+    const trackedBackups = execSync('git ls-files backend/backups', { encoding: 'utf-8' }).trim();
     assert('Sensitive backup directory is no longer tracked in Git index', trackedBackups.length === 0, `Found: ${trackedBackups}`);
 
-    const backupDirExists = fs.existsSync(path.resolve(__dirname, '../../backups/backup_1793114831900/admins.json'));
-    assert('Original local backup files are preserved safely on disk', backupDirExists);
+    const backupDirExists = fs.existsSync(path.resolve(__dirname, '../../backups'));
+    assert('Local backup directory is completely eliminated from project', !backupDirExists);
 
     // --------------------------------------------------------------------------
     // TEST 2: SEC-02 Backup Cron Webhook Security
@@ -171,7 +171,7 @@ async function runTests() {
     // --------------------------------------------------------------------------
     console.log('\n--- 6. SEC-07: PBKDF2 Salt Handling & Archive Versioning ---');
     const backupsDir = path.resolve(__dirname, '../../backups');
-    const backupFiles = fs.readdirSync(backupsDir).filter((f) => f.endsWith('.imsbak'));
+    const backupFiles = fs.existsSync(backupsDir) ? fs.readdirSync(backupsDir).filter((f) => f.endsWith('.imsbak')) : [];
     let legacyDecryptedCount = 0;
     for (const file of backupFiles) {
       const buffer = fs.readFileSync(path.join(backupsDir, file));

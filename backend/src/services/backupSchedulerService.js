@@ -112,10 +112,9 @@ async function executeScheduledBackup(type = 'SCHEDULED_DAILY') {
   try {
     console.log(`[BackupScheduler] Starting ${type} database backup...`);
 
-    // 1. Create local backup archive
+    // 1. Create backup archive in memory
     const backupResult = await databaseBackupService.createDatabaseBackup({
       type,
-      keepLocal: true,
     });
 
     const record = backupResult.record;
@@ -221,13 +220,6 @@ async function applyRetentionPolicies() {
       // Delete from Google Drive if fileId exists
       if (b.googleDrive?.fileId) {
         await googleDriveService.deleteBackupFile(b.googleDrive.fileId).catch(() => {});
-      }
-
-      // Delete local file if exists
-      if (b.localPath && fs.existsSync(b.localPath)) {
-        try {
-          fs.unlinkSync(b.localPath);
-        } catch {}
       }
 
       await BackupRecord.findByIdAndDelete(b._id);

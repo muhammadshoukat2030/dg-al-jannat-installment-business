@@ -41,6 +41,10 @@ backend/bin/
 *.imsbak.*
 *.imsbak.enc
 *.imsbak.json
+backend/backup_*.json
+backup_*.json
+*.bak
+*.dump
 backend/.google_drive_tokens.json*
 .google_drive_tokens.json*
 

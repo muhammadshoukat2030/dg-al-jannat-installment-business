@@ -6,6 +6,7 @@
 
 function getAllowedOrigins() {
   const envOrigins = [
+    process.env.CLIENT_ORIGIN,
     process.env.CLIENT_URL,
     process.env.ALLOWED_ORIGINS,
   ]
@@ -31,12 +32,12 @@ function isAllowedOrigin(origin) {
   const currentAllowed = getAllowedOrigins();
   if (currentAllowed.includes(normalizedOrigin)) return true;
   
-  if (/^https:\/\/dg-al-jannat-installment-business[a-z0-9-]*\.vercel\.app$/.test(normalizedOrigin)) return true;
+  if (/^https:\/\/[a-z0-9-]*(dg-al-jannat|installment)[a-z0-9-]*\.vercel\.app$/i.test(normalizedOrigin)) return true;
+  if (/^https:\/\/dg-al-jannat-installment-business[a-z0-9-]*\.vercel\.app$/i.test(normalizedOrigin)) return true;
   
-  if (process.env.NODE_ENV !== 'production') {
-    if (/^http:\/\/localhost(:[0-9]+)?$/.test(normalizedOrigin) || /^http:\/\/127\.0\.0\.1(:[0-9]+)?$/.test(normalizedOrigin)) {
-      return true;
-    }
+  // Localhost development origins
+  if (/^http:\/\/localhost(:[0-9]+)?$/.test(normalizedOrigin) || /^http:\/\/127\.0\.0\.1(:[0-9]+)?$/.test(normalizedOrigin)) {
+    return true;
   }
   return false;
 }

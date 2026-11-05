@@ -1,15 +1,16 @@
 /**
  * Database Backup and Disaster Recovery Service for Installment Management System 6
  *
- * Utilizes official MongoDB Database Tools (mongodump/mongorestore),
- * comprehensive metadata manifests, AES-256-GCM authenticated encryption,
- * SHA-256 integrity verification, and isolated disaster recovery testing.
+ * Utilizes pure Node.js in-memory Extended JSON (EJSON) serialization,
+ * GZIP stream compression, comprehensive metadata manifests, AES-256-GCM authenticated
+ * encryption, SHA-256 integrity verification, and direct-to-memory disaster recovery.
+ *
+ * 100% In-Memory Architecture: Zero local files or directories created on disk.
+ * Fully compatible with Vercel serverless read-only environments.
  */
 
-const fs = require('fs');
 const path = require('path');
-const os = require('os');
-const { spawn } = require('child_process');
+const zlib = require('zlib');
 const mongoose = require('mongoose');
 
 const cryptoService = require('./cryptoService');
@@ -17,22 +18,84 @@ const BackupRecord = require('../models/BackupRecord');
 const BackupAuditLog = require('../models/BackupAuditLog');
 const BackupConfig = require('../models/BackupConfig');
 
+// Constant path exported for backward compatibility with external references
 const BACKUPS_DIR = path.resolve(__dirname, '../../backups');
-if (!fs.existsSync(BACKUPS_DIR)) {
-  fs.mkdirSync(BACKUPS_DIR, { recursive: true });
-}
 
-// Resolve mongodump and mongorestore executable paths
-function getToolPath(toolName) {
-  const isWindows = process.platform === 'win32';
-  const binaryName = isWindows ? `${toolName}.exe` : toolName;
+/**
+ * Parses legacy MongoDB mongodump binary archives 100% in-memory without external tools.
+ */
+function parseMongodumpArchiveInMemory(decomp) {
+  const BSON = mongoose.mongo.BSON;
+  let offset = 4; // Skip magic 6de29981
+  const headerSize = decomp.readInt32LE(offset);
+  offset += headerSize;
 
-  // 1. Check local backend/bin directory
-  const localBin = path.resolve(__dirname, '../../bin', binaryName);
-  if (fs.existsSync(localBin)) return localBin;
+  const collectionsMeta = new Map();
+  while (offset < decomp.length) {
+    const size = decomp.readInt32LE(offset);
+    if (size === -1) {
+      offset += 4;
+      break;
+    }
+    const doc = BSON.deserialize(decomp.subarray(offset, offset + size));
+    offset += size;
+    if (doc.type === 'collection') {
+      const parsedMeta = doc.metadata ? JSON.parse(doc.metadata) : {};
+      collectionsMeta.set(doc.collection, {
+        indexes: parsedMeta.indexes || [],
+      });
+    }
+  }
 
-  // 2. Check system PATH
-  return binaryName;
+  const collectionsData = new Map();
+  for (const [colName, meta] of collectionsMeta.entries()) {
+    collectionsData.set(colName, {
+      name: colName,
+      indexes: meta.indexes
+        .filter((idx) => idx.name !== '_id_')
+        .map((idx) => {
+          const cleanKey = {};
+          for (const [k, v] of Object.entries(idx.key || {})) {
+            cleanKey[k] = typeof v === 'object' && v && v['$numberInt'] ? parseInt(v['$numberInt'], 10) : v;
+          }
+          return {
+            name: idx.name,
+            key: cleanKey,
+            unique: !!idx.unique,
+            sparse: !!idx.sparse,
+            weights: idx.weights || null,
+            default_language: idx.default_language || null,
+          };
+        }),
+      documents: [],
+      isRawDocs: true,
+    });
+  }
+
+  let currentCollection = null;
+  while (offset < decomp.length) {
+    if (offset + 4 > decomp.length) break;
+    const size = decomp.readInt32LE(offset);
+    if (size === -1) {
+      offset += 4;
+      continue;
+    }
+    if (size <= 0 || offset + size > decomp.length) break;
+
+    const doc = BSON.deserialize(decomp.subarray(offset, offset + size));
+    offset += size;
+
+    if (doc.EOF !== undefined) {
+      currentCollection = doc.EOF ? null : doc.collection;
+    } else if (currentCollection) {
+      const col = collectionsData.get(currentCollection);
+      if (col) {
+        col.documents.push(doc);
+      }
+    }
+  }
+
+  return Array.from(collectionsData.values());
 }
 
 /**
@@ -72,48 +135,66 @@ async function inspectDatabase(dbInstance = null) {
 }
 
 /**
- * Executes a child process tool with timeout and output capture.
+ * Extracts all collections, documents, and indexes in memory using BSON Extended JSON.
+ * Preserves exact BSON data types (ObjectId, Date, Decimal128, Binary, Int32, Long).
  */
-function runTool(toolPath, args, options = {}) {
-  return new Promise((resolve, reject) => {
-    const proc = spawn(toolPath, args, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true,
-      ...options,
+async function extractDatabaseInMemory(dbInstance = null) {
+  const db = dbInstance || mongoose.connection.db;
+  if (!db) throw new Error('Database is not connected');
+
+  const rawCollections = await db.listCollections().toArray();
+  const collections = rawCollections.filter((c) => !c.name.startsWith('system.'));
+
+  let totalDocuments = 0;
+  const extracted = [];
+
+  for (const col of collections) {
+    const collObj = db.collection(col.name);
+    const docs = await collObj.find({}).toArray();
+    const indexes = await collObj.indexes().catch(() => []);
+    totalDocuments += docs.length;
+
+    // Strict EJSON serialization preserves exact BSON types
+    const serializedDocs = docs.map((d) => mongoose.mongo.BSON.EJSON.serialize(d, { relaxed: false }));
+
+    extracted.push({
+      name: col.name,
+      documentCount: docs.length,
+      indexes: indexes
+        .filter((idx) => idx.name !== '_id_')
+        .map((idx) => ({
+          name: idx.name,
+          key: idx.key,
+          unique: !!idx.unique,
+          sparse: !!idx.sparse,
+          weights: idx.weights || null,
+          default_language: idx.default_language || null,
+        })),
+      documents: serializedDocs,
     });
+  }
 
-    let stdout = '';
-    let stderr = '';
+  extracted.sort((a, b) => a.name.localeCompare(b.name));
 
-    proc.stdout.on('data', (d) => (stdout += d));
-    proc.stderr.on('data', (d) => (stderr += d));
-
-    proc.on('error', (err) => reject(new Error(`Failed to execute ${path.basename(toolPath)}: ${err.message}`)));
-
-    proc.on('close', (code) => {
-      if (code === 0) {
-        resolve({ stdout, stderr });
-      } else {
-        reject(new Error(`${path.basename(toolPath)} failed (exit code ${code}): ${stderr || stdout}`));
-      }
-    });
-  });
+  return {
+    databaseName: db.databaseName,
+    totalCollections: extracted.length,
+    totalDocuments,
+    collections: extracted,
+  };
 }
 
 /**
- * Creates a complete database backup, manifest, and encrypted archive.
+ * Creates a complete database backup, manifest, and encrypted archive entirely in memory.
+ * Zero files or directories are written to disk.
  */
 async function createDatabaseBackup({
   type = 'MANUAL',
   createdBy = null,
-  keepLocal = true,
   customDbUri = null,
 } = {}) {
   const startTime = Date.now();
   const backupId = `ims_bak_${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}_${Math.random().toString(36).substring(2, 7)}`;
-  const dumpTool = getToolPath('mongodump');
-  const tempArchiveFile = path.join(os.tmpdir(), `${backupId}_raw.archive`);
-  const finalEncryptedFile = path.join(BACKUPS_DIR, `${backupId}.imsbak`);
 
   // Log start
   await BackupAuditLog.create({
@@ -121,38 +202,55 @@ async function createDatabaseBackup({
     status: 'INFO',
     backupId,
     adminId: createdBy,
-    details: { type },
+    details: { type, inMemory: true },
   }).catch(() => {});
 
   try {
-    const dbUri = customDbUri || process.env.MONGODB_URI || process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/installment_management3';
+    // 1. Gather comprehensive database data directly in memory
+    let dbInstance = null;
+    let externalConn = null;
 
-    // 1. Gather comprehensive database manifest before dump
-    const dbStats = await inspectDatabase();
+    if (customDbUri) {
+      externalConn = await mongoose.createConnection(customDbUri).asPromise();
+      dbInstance = externalConn.db;
+    } else {
+      dbInstance = mongoose.connection.db;
+    }
 
-    // 2. Run official mongodump with gzip compression and single-file archive
-    await runTool(dumpTool, [
-      `--uri=${dbUri}`,
-      `--archive=${tempArchiveFile}`,
-      '--gzip',
-    ]);
+    const extraction = await extractDatabaseInMemory(dbInstance);
+    if (externalConn) await externalConn.close();
 
-    const plainArchiveBuffer = fs.readFileSync(tempArchiveFile);
-    const plainSizeBytes = plainArchiveBuffer.length;
+    // 2. Build structured in-memory archive payload and compress via GZIP
+    const backupPayload = {
+      version: '2.0-secure-gcm',
+      format: 'bson-ejson',
+      databaseName: extraction.databaseName,
+      createdAt: new Date().toISOString(),
+      collections: extraction.collections,
+    };
+
+    const payloadJsonBuffer = Buffer.from(JSON.stringify(backupPayload), 'utf-8');
+    const compressedArchiveBuffer = zlib.gzipSync(payloadJsonBuffer, { level: 9 });
+    const plainSizeBytes = compressedArchiveBuffer.length;
 
     // 3. Construct Complete Database Manifest
     const manifest = {
       backupId,
       version: '2.0-secure-gcm',
       createdAt: new Date().toISOString(),
-      databaseName: dbStats.databaseName,
-      toolsVersion: '100.10.0',
-      totalCollections: dbStats.totalCollections,
-      totalDocuments: dbStats.totalDocuments,
-      collections: dbStats.collections,
+      databaseName: extraction.databaseName,
+      toolsVersion: 'node-bson-ejson-v2',
+      totalCollections: extraction.totalCollections,
+      totalDocuments: extraction.totalDocuments,
+      collections: extraction.collections.map((c) => ({
+        name: c.name,
+        documentCount: c.documentCount,
+        indexCount: c.indexes.length,
+        indexes: c.indexes,
+      })),
       storage: {
         plainSizeBytes,
-        plainSha256: cryptoService.calculateSha256(plainArchiveBuffer),
+        plainSha256: cryptoService.calculateSha256(compressedArchiveBuffer),
       },
       encryption: {
         algorithm: 'aes-256-gcm',
@@ -165,34 +263,26 @@ async function createDatabaseBackup({
       status: 'VERIFIED',
     };
 
-    // 4. Combine Manifest + Archive into a structured binary package
-    // Format: [4 bytes manifest length] + [manifest JSON UTF-8] + [raw archive payload]
+    // 4. Combine Manifest + Archive into a structured binary package in memory
+    // Format: [4 bytes manifest length big-endian] + [manifest JSON UTF-8] + [compressed archive payload]
     const manifestJsonBuffer = Buffer.from(JSON.stringify(manifest), 'utf-8');
     const manifestLenHeader = Buffer.alloc(4);
     manifestLenHeader.writeUInt32BE(manifestJsonBuffer.length, 0);
 
-    const fullPackage = Buffer.concat([manifestLenHeader, manifestJsonBuffer, plainArchiveBuffer]);
+    const fullPackage = Buffer.concat([manifestLenHeader, manifestJsonBuffer, compressedArchiveBuffer]);
 
     // 5. Encrypt with AES-256-GCM using unique per-archive cryptographic salt
     const encryptionResult = cryptoService.encryptArchiveBuffer(fullPackage);
     const encryptedBuffer = encryptionResult.encryptedBuffer;
     const encryptedSizeBytes = encryptedBuffer.length;
 
-    // 6. Write final encrypted file
-    fs.writeFileSync(finalEncryptedFile, encryptedBuffer);
-
-    // Remove temporary unencrypted file immediately
-    try {
-      fs.unlinkSync(tempArchiveFile);
-    } catch {}
-
-    // 7. Verify the written archive
+    // 6. Verify the newly generated archive in memory
     const verified = verifyEncryptedArchive(encryptedBuffer);
     if (!verified.isValid) {
       throw new Error(`Self-verification of newly generated backup failed: ${verified.error}`);
     }
 
-    // 8. Record in BackupRecord
+    // 7. Record in BackupRecord in MongoDB Atlas (zero local path)
     const record = await BackupRecord.create({
       backupId,
       type,
@@ -201,16 +291,16 @@ async function createDatabaseBackup({
       plainSizeBytes,
       encryptedSizeBytes,
       checksumSha256: encryptionResult.sha256,
-      databaseName: dbStats.databaseName,
-      totalCollections: dbStats.totalCollections,
-      totalDocuments: dbStats.totalDocuments,
-      collectionsSummary: dbStats.collections.map((c) => ({
+      databaseName: extraction.databaseName,
+      totalCollections: extraction.totalCollections,
+      totalDocuments: extraction.totalDocuments,
+      collectionsSummary: extraction.collections.map((c) => ({
         name: c.name,
         documentCount: c.documentCount,
-        indexCount: c.indexCount,
+        indexCount: c.indexes.length,
       })),
-      localPath: keepLocal ? finalEncryptedFile : '',
-      isLocalKept: keepLocal,
+      localPath: '',
+      isLocalKept: false,
       encryption: {
         algorithm: 'aes-256-gcm',
         version: encryptionResult.version || '2.0-salt',
@@ -221,11 +311,11 @@ async function createDatabaseBackup({
       },
       verificationStatus: 'VERIFIED',
       verifiedAt: new Date(),
-      verificationDetails: 'Cryptographic auth tag and SHA-256 checksum verified immediately after packaging.',
+      verificationDetails: 'Cryptographic auth tag and SHA-256 checksum verified immediately after in-memory packaging.',
       createdBy,
     });
 
-    // 9. Update config stats
+    // 8. Update config stats
     await BackupConfig.findOneAndUpdate(
       { key: 'global_backup_config' },
       {
@@ -238,7 +328,7 @@ async function createDatabaseBackup({
       { upsert: true }
     );
 
-    // 10. Audit log completion
+    // 9. Audit log completion
     await BackupAuditLog.create({
       action: 'BACKUP_COMPLETED',
       status: 'SUCCESS',
@@ -248,8 +338,9 @@ async function createDatabaseBackup({
         durationMs: Date.now() - startTime,
         plainSizeBytes,
         encryptedSizeBytes,
-        totalCollections: dbStats.totalCollections,
-        totalDocuments: dbStats.totalDocuments,
+        totalCollections: extraction.totalCollections,
+        totalDocuments: extraction.totalDocuments,
+        inMemory: true,
       },
     }).catch(() => {});
 
@@ -258,16 +349,11 @@ async function createDatabaseBackup({
       backupId,
       record,
       manifest,
-      filePath: finalEncryptedFile,
+      filePath: null,
       encryptedBuffer,
       checksumSha256: encryptionResult.sha256,
     };
   } catch (err) {
-    // Clean up temp file on failure
-    try {
-      if (fs.existsSync(tempArchiveFile)) fs.unlinkSync(tempArchiveFile);
-    } catch {}
-
     await BackupRecord.create({
       backupId,
       type,
@@ -290,7 +376,7 @@ async function createDatabaseBackup({
 }
 
 /**
- * Validates, decrypts, and extracts manifest from an encrypted backup archive buffer.
+ * Validates, decrypts, and extracts manifest from an encrypted backup archive buffer in memory.
  */
 function verifyEncryptedArchive(encryptedBuffer, customKey = null) {
   try {
@@ -327,15 +413,12 @@ function verifyEncryptedArchive(encryptedBuffer, customKey = null) {
 }
 
 /**
- * Restores a database backup archive into a target MongoDB database.
- * Supports:
- * 1. Isolated test restoration (into e.g. installment_management_test_recovery)
- * 2. Production disaster recovery restoration (with pre-restore safety snapshot)
+ * Restores a database backup archive into a target MongoDB database entirely in memory.
+ * Zero disk files written, zero external CLI dependencies.
  */
 async function restoreDatabase({
   backupRecordId = null,
   encryptedBuffer = null,
-  filePath = null,
   isTest = true,
   targetDbName = null,
   customTargetUri = null,
@@ -345,34 +428,21 @@ async function restoreDatabase({
   forceSafetySnapshot = false,
 } = {}) {
   const startTime = Date.now();
-  const restoreTool = getToolPath('mongorestore');
 
   // 1. Resolve encrypted buffer
   let archiveBuffer = encryptedBuffer;
-  let record = null;
-
-  if (!archiveBuffer && backupRecordId) {
-    record = await BackupRecord.findOne({ backupId: backupRecordId }).catch(() => null);
-    if (record && record.localPath && fs.existsSync(record.localPath)) {
-      archiveBuffer = fs.readFileSync(record.localPath);
-    }
-  }
-
-  if (!archiveBuffer && filePath && fs.existsSync(filePath)) {
-    archiveBuffer = fs.readFileSync(filePath);
-  }
 
   if (!archiveBuffer) {
-    throw new Error('Encrypted backup data was not provided and could not be loaded locally.');
+    throw new Error('Encrypted backup data was not provided for in-memory restore.');
   }
 
-  // 2. Cryptographic Verification & Decryption
+  // 2. Cryptographic Verification & Decryption in memory
   const verification = verifyEncryptedArchive(archiveBuffer);
   if (!verification.isValid) {
     await BackupAuditLog.create({
       action: 'RESTORE_FAILED',
       status: 'FAILURE',
-      backupId: record?.backupId || 'unknown',
+      backupId: 'unknown',
       adminId,
       ip,
       details: { error: verification.error },
@@ -396,76 +466,153 @@ async function restoreDatabase({
     details: { isTest, targetDbName: destinationDbName, selectedCollections },
   }).catch(() => {});
 
-  // 4. If this is a production restore (or forced safety snapshot) and database contains recoverable records, create an automatic safety backup first!
+  // 4. Pre-restore automatic safety backup in memory if this is a production restore and database is not empty
   let safetyBackupId = null;
   if (!isTest || forceSafetySnapshot) {
     try {
       const currentStats = await inspectDatabase().catch(() => null);
       if (currentStats && currentStats.totalDocuments > 0) {
-        console.log('Taking automatic safety backup before production restoration...');
+        console.log('Taking automatic in-memory safety backup before production restoration...');
         const safetyBackup = await createDatabaseBackup({
           type: 'SAFETY_PRE_RESTORE',
           createdBy: adminId,
-          keepLocal: true,
         });
         safetyBackupId = safetyBackup.backupId;
-      } else {
-        console.log('Notice: Production database is currently empty — skipping safety snapshot.');
+
+        // Upload safety snapshot directly to Google Drive (zero local file footprint)
+        try {
+          const googleDriveService = require('./googleDriveService');
+          const config = await BackupConfig.findOne({ key: 'global_backup_config' });
+          if (config?.googleDrive?.isConnected) {
+            console.log('Uploading pre-restore safety snapshot directly to Google Drive...');
+            const uploadRes = await googleDriveService.uploadBackupFile({
+              fileName: `${safetyBackup.backupId}.imsbak`,
+              fileBuffer: safetyBackup.encryptedBuffer,
+              folderId: config.googleDrive.folderId,
+              properties: {
+                backupId: safetyBackup.backupId,
+                sha256: safetyBackup.checksumSha256,
+                isSafetySnapshot: 'true',
+              },
+            });
+            if (uploadRes?.fileId) {
+              await BackupRecord.updateOne(
+                { backupId: safetyBackup.backupId },
+                {
+                  $set: {
+                    'googleDrive.fileId': uploadRes.fileId,
+                    'googleDrive.folderId': uploadRes.folderId,
+                    'googleDrive.uploadedAt': new Date(),
+                    'googleDrive.webContentLink': uploadRes.webContentLink,
+                  },
+                }
+              );
+            }
+          }
+        } catch (uploadErr) {
+          console.warn('Notice: Could not upload safety snapshot to Google Drive:', uploadErr.message);
+        }
       }
     } catch (safetyErr) {
-      console.warn('Notice: Could not take safety backup (database may be completely empty/deleted):', safetyErr.message);
+      console.warn('Notice: Could not take safety backup:', safetyErr.message);
     }
   }
 
-  // 5. Write raw uncompressed BSON archive to a secure temporary file for mongorestore
-  const tempRestoreFile = path.join(os.tmpdir(), `restore_${manifest.backupId}_${Date.now()}.archive`);
-  fs.writeFileSync(tempRestoreFile, rawArchive);
+  // 5. Connect to destination database
+  let targetDb = mongoose.connection.db;
+  let closeTargetConn = null;
 
-  try {
-    const baseUri = customTargetUri || process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017';
-
-    // mongorestore arguments:
-    // If selectedCollections is provided, only include those collections!
-    // With --drop, only the included collections are dropped and replaced.
-    const restoreArgs = [
-      `--uri=${baseUri}`,
-      `--archive=${tempRestoreFile}`,
-      '--gzip',
-      '--drop',
-    ];
-
-    const hasSelective = Array.isArray(selectedCollections) && selectedCollections.length > 0;
-
-    if (destinationDbName !== sourceDbName) {
-      restoreArgs.push(`--nsFrom=${sourceDbName}.*`);
-      restoreArgs.push(`--nsTo=${destinationDbName}.*`);
-      if (hasSelective) {
-        for (const col of selectedCollections) {
-          restoreArgs.push(`--nsInclude=${destinationDbName}.${col}`);
-        }
-      } else {
-        restoreArgs.push(`--nsInclude=${destinationDbName}.*`);
-      }
-    } else {
-      if (hasSelective) {
-        for (const col of selectedCollections) {
-          restoreArgs.push(`--nsInclude=${sourceDbName}.${col}`);
-        }
-      }
-    }
-
-    // 6. Execute mongorestore
-    const restoreResult = await runTool(restoreTool, restoreArgs);
-
-    // 7. Connect to the restored database to audit and verify restoration
+  if (isTest || destinationDbName !== sourceDbName || customTargetUri) {
+    const baseUri = customTargetUri || process.env.MONGODB_URI || process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/installment_management3';
     const connStr = baseUri.includes('?')
       ? baseUri.replace(/\/([^/?]+)(\?.*)?$/, `/${destinationDbName}$2`)
       : baseUri.replace(/\/([^/?]+)$/, `/${destinationDbName}`);
 
-    const verifyConn = await mongoose.createConnection(connStr).asPromise();
-    const restoredStats = await inspectDatabase(verifyConn.db);
+    const targetConn = await mongoose.createConnection(connStr).asPromise();
+    targetDb = targetConn.db;
+    closeTargetConn = () => targetConn.close();
+  }
 
-    // 8. Validate restored collections & counts against manifest
+  try {
+    // 6. Decompress archive payload in memory
+    const decompressed = zlib.gunzipSync(rawArchive);
+    const hasSelective = Array.isArray(selectedCollections) && selectedCollections.length > 0;
+
+    let collectionsList = [];
+    if (decompressed.length > 0 && decompressed[0] === 0x7b) {
+      // Modern in-memory Extended JSON backup format
+      const backupPayload = JSON.parse(decompressed.toString('utf-8'));
+      collectionsList = backupPayload.collections || [];
+    } else if (
+      decompressed.length >= 4 &&
+      decompressed[0] === 0x6d &&
+      decompressed[1] === 0xe2 &&
+      decompressed[2] === 0x99 &&
+      decompressed[3] === 0x81
+    ) {
+      // Legacy mongodump binary archive format (parsed 100% in-memory)
+      collectionsList = parseMongodumpArchiveInMemory(decompressed);
+    } else {
+      throw new Error('Unsupported archive format: Unrecognized binary stream header.');
+    }
+
+    const collectionsToRestore = hasSelective
+      ? collectionsList.filter((c) => selectedCollections.includes(c.name))
+      : collectionsList;
+
+    for (const colData of collectionsToRestore) {
+      // Ensure collection exists even if it has 0 documents
+      await targetDb.createCollection(colData.name).catch(() => {});
+      const collObj = targetDb.collection(colData.name);
+
+      // Drop existing data in this collection
+      await collObj.deleteMany({});
+
+      // Deserialize documents if needed (modern EJSON) or use directly if raw BSON objects
+      if (colData.documents && colData.documents.length > 0) {
+        const docs = colData.isRawDocs
+          ? colData.documents
+          : colData.documents.map((d) => mongoose.mongo.BSON.EJSON.deserialize(d, { relaxed: false }));
+
+        // Bulk insert in chunks of 500 documents
+        const CHUNK_SIZE = 500;
+        for (let i = 0; i < docs.length; i += CHUNK_SIZE) {
+          const chunk = docs.slice(i, i + CHUNK_SIZE);
+          await collObj.insertMany(chunk, { ordered: false });
+        }
+      }
+
+      // Recreate indexes
+      if (colData.indexes && colData.indexes.length > 0) {
+        for (const idx of colData.indexes) {
+          if (idx.name !== '_id_' && idx.key) {
+            let indexKey = idx.key;
+            const indexOptions = {
+              name: idx.name,
+              unique: !!idx.unique,
+              sparse: !!idx.sparse,
+              background: true,
+            };
+
+            if (idx.weights && typeof idx.weights === 'object') {
+              const textKey = {};
+              for (const field of Object.keys(idx.weights)) {
+                textKey[field] = 'text';
+              }
+              indexKey = textKey;
+              if (idx.default_language) indexOptions.default_language = idx.default_language;
+            }
+
+            await collObj
+              .createIndex(indexKey, indexOptions)
+              .catch((e) => console.warn(`Index restore note for ${colData.name}.${idx.name}:`, e.message));
+          }
+        }
+      }
+    }
+
+    // 7. Verify restored collections and document counts against manifest in memory
+    const restoredStats = await inspectDatabase(targetDb);
     const discrepancies = [];
     const expectedCollections = hasSelective
       ? manifest.collections.filter((c) => selectedCollections.includes(c.name))
@@ -482,11 +629,9 @@ async function restoreDatabase({
       }
     }
 
-    await verifyConn.close();
-
     const isFullyVerified = discrepancies.length === 0;
 
-    // 9. Audit log completion
+    // 8. Audit log completion
     await BackupAuditLog.create({
       action: isTest ? 'RESTORE_TEST_COMPLETED' : 'RESTORE_PRODUCTION_COMPLETED',
       status: isFullyVerified ? 'SUCCESS' : 'FAILURE',
@@ -505,7 +650,6 @@ async function restoreDatabase({
       },
     }).catch(() => {});
 
-    // Calculate total documents for restored collections
     const totalRestoredDocs = expectedCollections.reduce((sum, c) => sum + (c.documentCount || 0), 0);
 
     return {
@@ -522,13 +666,11 @@ async function restoreDatabase({
       restoredDocuments: totalRestoredDocs,
       discrepancies,
       safetyBackupId,
-      details: restoreResult.stderr || restoreResult.stdout,
     };
   } finally {
-    // Always clean up raw unencrypted archive from temp disk
-    try {
-      if (fs.existsSync(tempRestoreFile)) fs.unlinkSync(tempRestoreFile);
-    } catch {}
+    if (closeTargetConn) {
+      await closeTargetConn().catch(() => {});
+    }
   }
 }
 

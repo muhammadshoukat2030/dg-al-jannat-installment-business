@@ -105,21 +105,8 @@ function validateAndConsumeOAuthState(state) {
  * Ensures recovery is possible even if all MongoDB collections or databases are deleted.
  */
 function saveTokensToDisk(data) {
-  try {
-    if (!data) return;
-    const cloned = JSON.parse(JSON.stringify(data));
-    if (cloned.tokens) {
-      if (cloned.tokens.access_token) {
-        cloned.tokens.access_token = cryptoService.encryptSecretText(cloned.tokens.access_token);
-      }
-      if (cloned.tokens.refresh_token) {
-        cloned.tokens.refresh_token = cryptoService.encryptSecretText(cloned.tokens.refresh_token);
-      }
-    }
-    fs.writeFileSync(DISK_TOKEN_PATH, JSON.stringify(cloned, null, 2), { encoding: 'utf-8', mode: 0o600 });
-  } catch (err) {
-    console.warn('[GoogleDrive] Could not save tokens to disk:', err.message);
-  }
+  // Pure in-memory / MongoDB Atlas architecture: zero disk files generated
+  return;
 }
 
 /**
@@ -568,25 +555,18 @@ async function listGoogleDriveBackups() {
     };
   }
 
-  // Inspect local backups directory to mark local availability
-  const BACKUPS_DIR = path.resolve(__dirname, '../../backups');
-
-  const backups = files.map((f) => {
-    const localFile = path.join(BACKUPS_DIR, f.name);
-    const isLocal = fs.existsSync(localFile);
-    return {
-      fileId: f.id,
-      fileName: f.name,
-      sizeBytes: parseInt(f.size || 0, 10),
-      createdAt: f.createdTime,
-      modifiedAt: f.modifiedTime,
-      backupId: f.properties?.backupId || f.name.replace('.imsbak', ''),
-      sha256: f.properties?.sha256 || '',
-      isCloud: true,
-      isLocal,
-      webContentLink: f.webContentLink || '',
-    };
-  });
+  const backups = files.map((f) => ({
+    fileId: f.id,
+    fileName: f.name,
+    sizeBytes: parseInt(f.size || 0, 10),
+    createdAt: f.createdTime,
+    modifiedAt: f.modifiedTime,
+    backupId: f.properties?.backupId || f.name.replace('.imsbak', ''),
+    sha256: f.properties?.sha256 || '',
+    isCloud: true,
+    isLocal: false,
+    webContentLink: f.webContentLink || '',
+  }));
 
   return {
     connected: true,
