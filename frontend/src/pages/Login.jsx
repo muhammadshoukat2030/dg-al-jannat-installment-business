@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { Sun, Moon } from 'lucide-react';
 import DeveloperFooter from '../components/common/DeveloperFooter';
+import logoImg from '../assets/DJ Aljanat Buy Now Pay Later Badge.webp';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -39,9 +40,11 @@ export default function Login() {
       </button>
 
       <div className="card w-full max-w-sm border border-theme-border shadow-md p-6 bg-theme-card">
-        <div className="w-12 h-12 rounded-xl bg-theme-primary text-white flex items-center justify-center font-bold text-lg mx-auto mb-3 shadow-sm">
-          IM
-        </div>
+        <img
+          src={logoImg}
+          alt="DJ Aljanat Logo"
+          className="w-14 h-14 object-contain rounded-xl mx-auto mb-3 shadow-sm"
+        />
         <h1 className="text-xl font-bold text-center text-theme-text mb-1">Installment System</h1>
         <p className="text-sm text-theme-muted text-center mb-6">Sign in to your account</p>
         <form onSubmit={handleSubmit} className="space-y-4">

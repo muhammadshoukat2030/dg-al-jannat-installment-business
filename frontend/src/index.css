@@ -211,7 +211,33 @@
   background: var(--text-secondary);
 }
 
+.print-document-header {
+  display: none;
+}
+
 @media print {
+  .print-document-header {
+    display: block !important;
+    visibility: visible !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    text-align: center !important;
+    margin-top: 0 !important;
+    margin-bottom: 6px !important;
+    padding-top: 0 !important;
+    padding-bottom: 4px !important;
+    border-bottom: 1px solid #e5e7eb !important;
+  }
+  .print-document-header img {
+    display: block !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+    margin-top: 0 !important;
+    margin-bottom: 2px !important;
+    width: 36px !important;
+    height: 36px !important;
+    object-fit: contain !important;
+  }
   .no-print,
   aside,
   header {

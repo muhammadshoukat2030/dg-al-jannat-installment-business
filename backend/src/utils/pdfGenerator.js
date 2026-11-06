@@ -1,5 +1,20 @@
 const PDFDocument = require('pdfkit');
+const path = require('path');
+const fs = require('fs');
 const { formatCurrency, formatDate, formatDateTime } = require('./formatHelpers');
+
+const LOGO_PATHS = [
+  path.join(__dirname, '../assets/logo-compact.png'),
+  path.join(__dirname, '../assets/logo.png'),
+  path.join(__dirname, '../assets/logo-optimized.png'),
+];
+
+function getLogoPath() {
+  for (const p of LOGO_PATHS) {
+    if (fs.existsSync(p)) return p;
+  }
+  return null;
+}
 
 // Fixed developer branding — per explicit requirement this text is permanent,
 // never settings-derived, and never editable/removable by the Owner/Admin.
@@ -17,7 +32,11 @@ const DEVELOPER_WEBSITE_URL = 'https://devzore.com';
  * Caller must call finalizePdf(doc) instead of doc.end() directly.
  */
 function startPdf(res, filename) {
-  const doc = new PDFDocument({ margin: 40, size: 'A4', bufferPages: true });
+  const doc = new PDFDocument({
+    margins: { top: 26, bottom: 40, left: 40, right: 40 },
+    size: 'A4',
+    bufferPages: true,
+  });
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
   doc.pipe(res);
@@ -25,14 +44,28 @@ function startPdf(res, filename) {
 }
 
 /**
- * Draws the business/owner header using only whatever fields are actually
- * filled in on the Settings page. Nothing here is hard-coded.
+ * Draws the business/owner header with the DJ Aljanat logo and
+ * whatever fields are actually filled in on the Settings page.
+ * Spacing and logo dimensions are optimized to preserve vertical
+ * room and prevent reports from spilling onto an extra page.
  */
 function drawHeader(doc, settings, title) {
-  doc.fontSize(16).font('Helvetica-Bold').text(settings.businessName || 'Installment Business', { align: 'center' });
+  const logoPath = getLogoPath();
+  if (logoPath) {
+    try {
+      const logoSize = 35;
+      const logoX = (doc.page.width - logoSize) / 2;
+      doc.image(logoPath, logoX, doc.y, { fit: [logoSize, logoSize], align: 'center' });
+      doc.y += logoSize + 2;
+    } catch (e) {
+      // Gracefully continue without logo if image decoding encounters an error
+    }
+  }
+
+  doc.fontSize(15).font('Helvetica-Bold').text(settings.businessName || 'Installment Business', { align: 'center' });
 
   if (settings.ownerName) {
-    doc.fontSize(9).font('Helvetica').fillColor('#444').text(settings.ownerName, { align: 'center' });
+    doc.fontSize(8.5).font('Helvetica').fillColor('#444').text(settings.ownerName, { align: 'center' });
   }
 
   const contactBits = [];
@@ -40,27 +73,27 @@ function drawHeader(doc, settings, title) {
   if (settings.phone2) contactBits.push(settings.phone2);
   if (settings.whatsapp) contactBits.push(`WhatsApp: ${settings.whatsapp}`);
   if (contactBits.length) {
-    doc.fontSize(9).font('Helvetica').fillColor('#444').text(contactBits.join('  |  '), { align: 'center' });
+    doc.fontSize(8.5).font('Helvetica').fillColor('#444').text(contactBits.join('  |  '), { align: 'center' });
   }
 
   const secondaryBits = [];
   if (settings.email) secondaryBits.push(settings.email);
   if (settings.website) secondaryBits.push(settings.website);
   if (secondaryBits.length) {
-    doc.fontSize(9).text(secondaryBits.join('  |  '), { align: 'center' });
+    doc.fontSize(8.5).text(secondaryBits.join('  |  '), { align: 'center' });
   }
 
   if (settings.address) {
-    doc.fontSize(9).text(settings.address, { align: 'center' });
+    doc.fontSize(8.5).text(settings.address, { align: 'center' });
   }
 
   doc.fillColor('#000');
-  doc.moveDown(0.6);
-  doc.fontSize(13).font('Helvetica-Bold').text(title, { align: 'center' });
   doc.moveDown(0.3);
-  doc.fontSize(9).font('Helvetica').fillColor('#666').text(`Printed On: ${formatDateTime(new Date())}`, { align: 'center' });
+  doc.fontSize(12).font('Helvetica-Bold').text(title, { align: 'center' });
+  doc.moveDown(0.15);
+  doc.fontSize(8.5).font('Helvetica').fillColor('#666').text(`Printed On: ${formatDateTime(new Date())}`, { align: 'center' });
   doc.fillColor('#000');
-  doc.moveDown(1);
+  doc.moveDown(0.4);
 }
 
 /**
@@ -189,13 +222,13 @@ function generateReceiptPdf(res, { settings, customer, plan, installment, paymen
     doc.fillColor('#000');
   }
 
-  doc.moveDown(2);
+  doc.moveDown(1.2);
   const y = doc.y;
   doc.text('Admin Signature: ______________________', 40, y);
   doc.text('Customer Signature: ______________________', 320, y);
 
   if (settings.receiptFooter) {
-    doc.moveDown(3);
+    doc.moveDown(1.5);
     const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
     doc.fontSize(8).fillColor('#666').text(settings.receiptFooter, doc.page.margins.left, doc.y, { width: pageWidth, align: 'center' });
     doc.fillColor('#000');

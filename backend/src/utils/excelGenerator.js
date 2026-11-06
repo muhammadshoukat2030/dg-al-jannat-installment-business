@@ -1,7 +1,22 @@
 const ExcelJS = require('exceljs');
+const path = require('path');
+const fs = require('fs');
 
 const DEVELOPER_FOOTER_TEXT = 'Developed by SHOUKAT | 03348004300 | devzore.com';
 const DEVELOPER_WEBSITE_URL = 'https://devzore.com';
+
+const LOGO_PATHS = [
+  path.join(__dirname, '../assets/logo-compact.png'),
+  path.join(__dirname, '../assets/logo.png'),
+  path.join(__dirname, '../assets/logo-optimized.png'),
+];
+
+function getLogoPath() {
+  for (const p of LOGO_PATHS) {
+    if (fs.existsSync(p)) return p;
+  }
+  return null;
+}
 
 /**
  * Stream a generic worksheet of rows to the response as .xlsx.
@@ -27,6 +42,24 @@ async function generateExcel(res, { filename, sheetName, columns, rows }) {
   // Printed-page footer (shows when the sheet is printed/exported to PDF from Excel).
   sheet.headerFooter.oddFooter = `&C${DEVELOPER_FOOTER_TEXT}`;
   sheet.headerFooter.evenFooter = `&C${DEVELOPER_FOOTER_TEXT}`;
+
+  // Embed DJ Aljanat logo into the worksheet
+  const logoPath = getLogoPath();
+  if (logoPath) {
+    try {
+      const imageId = workbook.addImage({
+        filename: logoPath,
+        extension: 'png',
+      });
+      const colPlacement = Math.max(columns.length, 2);
+      sheet.addImage(imageId, {
+        tl: { col: colPlacement - 0.95, row: 0.05 },
+        ext: { width: 44, height: 44 },
+      });
+    } catch {
+      // Continue gracefully if image cannot be embedded
+    }
+  }
 
   // Also add a visible caption row below the data (separated by a blank row) so the
   // branding is visible on-screen too, not just on a printed page. Kept clearly

@@ -25,6 +25,7 @@ import { getSettingsOffline, setSettingsOffline, enqueueOperation } from '../off
 import { refreshPendingCount } from '../offline/syncManager';
 import BackupManager from '../components/backup/BackupManager';
 import DeveloperFooter from '../components/common/DeveloperFooter';
+import logoImg from '../assets/DJ Aljanat Buy Now Pay Later Badge.webp';
 
 export default function Settings() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -195,17 +196,11 @@ export default function Settings() {
               <div className="card p-4 sm:p-5 bg-gradient-to-r from-primary-500/10 via-transparent to-transparent border-primary-500/20">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div className="flex items-center gap-3.5">
-                    <div className="w-12 h-12 rounded-xl bg-primary-600 text-white font-bold text-base sm:text-lg flex items-center justify-center shadow-md shadow-primary-500/20 shrink-0">
-                      {settings.businessName
-                        ? settings.businessName
-                            .split(' ')
-                            .map((w) => w[0])
-                            .filter(Boolean)
-                            .slice(0, 2)
-                            .join('')
-                            .toUpperCase() || 'BP'
-                        : 'BP'}
-                    </div>
+                    <img
+                      src={logoImg}
+                      alt="DJ Aljanat Logo"
+                      className="w-12 h-12 object-contain rounded-xl shadow-md shadow-primary-500/20 shrink-0"
+                    />
                     <div>
                       <div className="flex items-center gap-2 flex-wrap">
                         <h2 className="text-base sm:text-lg font-bold text-gray-900 dark:text-gray-100">
@@ -464,16 +459,29 @@ export default function Settings() {
                       This disclaimer or greeting note appears clearly at the bottom of every customer payment receipt.
                     </p>
 
-                    {/* Live Receipt Footer Visual Preview Box */}
-                    <div className="mt-3 p-3.5 rounded-lg bg-gray-50 dark:bg-gray-900/60 border border-dashed border-gray-300 dark:border-gray-700/80 space-y-1.5">
+                    {/* Live Receipt Visual Preview Box */}
+                    <div className="mt-3 p-3.5 rounded-lg bg-gray-50 dark:bg-gray-900/60 border border-dashed border-gray-300 dark:border-gray-700/80 space-y-2">
                       <div className="flex items-center justify-between text-[11px] text-gray-400 font-medium">
                         <span className="flex items-center gap-1 text-gray-600 dark:text-gray-300 font-semibold">
-                          <Receipt className="w-3.5 h-3.5 text-emerald-500" /> Customer Receipt Bottom Preview:
+                          <Receipt className="w-3.5 h-3.5 text-emerald-500" /> Customer Payment Receipt Preview:
                         </span>
                         <span className="text-[10px] uppercase tracking-wider font-mono text-gray-400">Thermal / A4 Slip</span>
                       </div>
-                      <div className="pt-2 border-t border-dashed border-gray-200 dark:border-gray-700 text-center font-mono text-xs text-gray-700 dark:text-gray-300 py-1.5 italic bg-white dark:bg-gray-800/60 rounded">
-                        "{settings.footerNote || settings.receiptFooter || 'Computer generated receipt. Thank you for your business!'}"
+                      <div className="pt-2 border-t border-dashed border-gray-200 dark:border-gray-700 text-center bg-white dark:bg-gray-800/60 rounded p-2.5 space-y-1.5">
+                        <img
+                          src={logoImg}
+                          alt="DJ Aljanat Logo"
+                          className="w-10 h-10 object-contain mx-auto rounded shadow-sm"
+                        />
+                        <div className="font-bold text-xs text-gray-900 dark:text-gray-100 uppercase tracking-tight">
+                          {settings.businessName || 'DJ ALJANAT INSTALLMENT BUSINESS'}
+                        </div>
+                        <div className="text-[10px] text-gray-500 font-mono tracking-wider">
+                          *** PAYMENT RECEIPT ***
+                        </div>
+                        <div className="pt-1.5 border-t border-dashed border-gray-200 dark:border-gray-700 font-mono text-xs text-gray-700 dark:text-gray-300 italic py-1">
+                          "{settings.footerNote || settings.receiptFooter || 'Computer generated receipt. Thank you for your business!'}"
+                        </div>
                       </div>
                       <DeveloperFooter thermal={true} className="!pt-1.5 !border-t-0" />
                     </div>

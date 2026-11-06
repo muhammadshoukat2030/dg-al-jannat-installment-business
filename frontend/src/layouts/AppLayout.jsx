@@ -21,6 +21,7 @@ import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import SyncStatusIndicator from '../components/common/SyncStatusIndicator';
 import DeveloperFooter from '../components/common/DeveloperFooter';
+import logoImg from '../assets/DJ Aljanat Buy Now Pay Later Badge.webp';
 
 const navItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
@@ -97,20 +98,24 @@ export default function AppLayout() {
         {/* Brand Header */}
         <div className="h-16 flex items-center justify-between px-4 border-b border-theme-border shrink-0">
           {!isCollapsed ? (
-            <div className="flex items-center gap-2 overflow-hidden">
-              <div className="w-8 h-8 rounded-lg bg-theme-primary text-white flex items-center justify-center font-bold text-sm shadow-sm shrink-0">
-                A K
-              </div>
+            <div className="flex items-center gap-2.5 overflow-hidden">
+              <img
+                src={logoImg}
+                alt="DJ Aljanat Logo"
+                className="w-10 h-10 sm:w-11 sm:h-11 object-contain rounded-lg shadow-sm shrink-0"
+              />
               <span className="font-bold text-theme-primary text-sm leading-tight truncate">
-                AMJID 
+                AMJAD 
                 <br />
-                KHAN
+                AFRIDI
               </span>
             </div>
           ) : (
-            <div className="mx-auto w-8 h-8 rounded-lg bg-theme-primary text-white flex items-center justify-center font-bold text-sm shadow-sm">
-              A K
-            </div>
+            <img
+              src={logoImg}
+              alt="DJ Aljanat Logo"
+              className="mx-auto w-10 h-10 sm:w-11 sm:h-11 object-contain rounded-lg shadow-sm"
+            />
           )}
 
           {/* Mobile close button */}
@@ -195,7 +200,12 @@ export default function AppLayout() {
             >
               <Menu className="w-5 h-5" />
             </button>
-            <span className="md:hidden font-bold text-sm text-theme-primary">AMJID KHAN</span>
+            <img
+              src={logoImg}
+              alt="DJ Aljanat Logo"
+              className="md:hidden w-9 h-9 sm:w-10 sm:h-10 object-contain rounded-md shadow-sm shrink-0"
+            />
+            <span className="md:hidden font-bold text-sm text-theme-primary">AMJAD AFRIDI</span>
           </div>
 
           <div className="flex items-center gap-3">
@@ -229,6 +239,17 @@ export default function AppLayout() {
 
         {/* Scrollable Page Body */}
         <main className="flex-1 overflow-y-auto p-4 md:p-6 w-full flex flex-col transition-colors">
+          {/* Printable Document Header (Appears only on printed records, receipts & reports) */}
+          <div className="print-document-header">
+            <img
+              src={logoImg}
+              alt="DJ Aljanat Logo"
+              className="w-9 h-9 object-contain mx-auto mb-0.5"
+            />
+            <h1 className="text-xs font-bold text-gray-900 tracking-tight leading-tight">AMJAD AFRIDI INSTALLMENTS</h1>
+            <p className="text-[10px] text-gray-600 leading-tight">DJ Aljanat Buy Now Pay Later · Customer & Financial Management System</p>
+          </div>
+
           <div className="max-w-7xl w-full mx-auto flex-1">
             <Outlet />
           </div>
